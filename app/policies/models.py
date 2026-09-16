@@ -1,0 +1,60 @@
+from datetime import UTC, datetime
+from decimal import Decimal
+from enum import StrEnum
+from uuid import UUID, uuid4
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.tools.models import ToolRiskLevel
+
+
+class PolicyDecision(StrEnum):
+    ALLOW = "allow"
+    REQUIRE_APPROVAL = "require_approval"
+    DENY = "deny"
+    ESCALATE = "escalate"
+
+
+class ProposedAction(BaseModel):
+    action_type: str
+    tool_name: str
+    arguments: dict[str, str | int | bool] = Field(default_factory=dict)
+    risk_level: ToolRiskLevel
+    reversible: bool = False
+    rollback_tool: str | None = None
+    rollback_arguments: dict[str, str | int | bool] | None = None
+    estimated_value: Decimal | None = None
+
+
+class PolicyDecisionResult(BaseModel):
+    decision: PolicyDecision
+    reason: str
+    policy_name: str
+    action: ProposedAction
+    metadata: dict[str, str | int | bool] = Field(default_factory=dict)
+
+
+class ApprovalStatus(StrEnum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    DENIED = "denied"
+    EXPIRED = "expired"
+
+
+class ApprovalRequest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    approval_id: UUID = Field(default_factory=uuid4)
+    request_id: UUID
+    action: ProposedAction
+    reason: str
+    requested_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    status: ApprovalStatus = ApprovalStatus.PENDING
+
+
+class ApprovalDecision(BaseModel):
+    approval_id: UUID
+    status: ApprovalStatus
+    decided_by: str
+    decided_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    comment: str | None = None
