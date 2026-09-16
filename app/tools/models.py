@@ -1,7 +1,7 @@
 from enum import StrEnum
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SerializeAsAny
 
 
 class ToolRiskLevel(StrEnum):
@@ -20,7 +20,7 @@ class ToolResult(BaseModel):
     call_id: UUID
     tool_name: str
     success: bool
-    output: BaseModel | None = None
+    output: SerializeAsAny[BaseModel] | None = None
     error: str | None = None
     reversible: bool = False
     metadata: dict[str, str | int | bool] = Field(default_factory=dict)

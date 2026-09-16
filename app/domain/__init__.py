@@ -1,0 +1,1 @@
+"""Synthetic support domain models."""

@@ -1,16 +1,23 @@
 import argparse
+import json
+from pathlib import Path
 
 from app.core.config import get_settings
+from app.domain.tickets import TicketStatus
 from app.llm.base import LLMProviderError
 from app.llm.models import ChatMessage, ChatRole
 from app.llm.ollama_provider import OllamaProvider
 from app.services.health_service import HealthService
+from app.support.service import create_demo_support_service
 from app.tools.demo import EchoTool, EchoToolInput
+from app.tools.models import ToolRiskLevel
 from app.tools.registry import ToolRegistry
+from app.tools.support_registry import create_support_tool_registry
 
 
 def build_registry(include_demo_tools: bool = False) -> ToolRegistry:
-    registry = ToolRegistry()
+    service = create_demo_support_service()
+    registry = create_support_tool_registry(service)
     if include_demo_tools:
         registry.register(EchoTool())
     return registry
@@ -64,11 +71,103 @@ def run_tool_test(tool_name: str) -> int:
     return 0
 
 
+def print_customer(customer_id: str) -> int:
+    service = create_demo_support_service()
+    customer = service.get_customer(customer_id)
+    orders = service.get_customer_orders(customer_id)
+    open_tickets = [
+        ticket
+        for ticket in service.get_customer_tickets(customer_id)
+        if ticket.status != TicketStatus.CLOSED
+    ]
+    print("Customer")
+    print(f"  ID: {customer.customer_id}")
+    print(f"  Name: {customer.name}")
+    print(f"  Email: {customer.email}")
+    print(f"  Status: {customer.status.value}")
+    print("Orders")
+    for order in orders:
+        print(f"  {order.order_id}: {order.total} {order.currency} ({order.status.value})")
+    print("Open tickets")
+    for ticket in open_tickets:
+        print(f"  {ticket.ticket_id}: {ticket.subject} ({ticket.status.value})")
+    return 0
+
+
+def print_order(order_id: str) -> int:
+    service = create_demo_support_service()
+    order = service.get_order(order_id)
+    print("Order")
+    print(f"  ID: {order.order_id}")
+    print(f"  Customer: {order.customer_id}")
+    print("Items")
+    for item in order.items:
+        print(f"  {item.quantity} x {item.product_name} @ {item.unit_price}")
+    print(f"Total: {order.total} {order.currency}")
+    print(f"Status: {order.status.value}")
+    print(f"Delivered: {order.delivered_at.date() if order.delivered_at else 'not delivered'}")
+    print(f"Refunded: {order.refund_total} {order.currency}")
+    print(f"Remaining refundable: {order.remaining_refundable_amount} {order.currency}")
+    return 0
+
+
+def print_refund_policy() -> int:
+    policy = create_demo_support_service().get_refund_policy()
+    print("Refund Policy")
+    print(f"Version: {policy.policy_version}")
+    print(f"Return window: {policy.return_window_days} days")
+    print(f"Automatic refund threshold: {policy.auto_refund_limit}")
+    print(f"Approval threshold: {policy.approval_refund_limit}")
+    print(f"Requires delivered order: {policy.requires_delivered_order}")
+    print(f"Allowed reasons: {', '.join(policy.allowed_reasons)}")
+    return 0
+
+
+def run_tool_command(
+    tool_name: str,
+    raw_input: str | None,
+    input_file: str | None,
+    confirm_write: bool,
+) -> int:
+    registry = build_registry()
+    tool = registry.get(tool_name)
+    if tool.risk_level != ToolRiskLevel.READ_ONLY and not confirm_write:
+        print("Refusing to execute write tool without --confirm-write.")
+        print(f"Tool: {tool.name}")
+        print(f"Risk: {tool.risk_level.value}")
+        return 1
+    try:
+        if input_file is not None:
+            payload_text = Path(input_file).read_text(encoding="utf-8-sig")
+        else:
+            payload_text = raw_input or "{}"
+        payload = json.loads(payload_text)
+        tool_input = tool.input_model.model_validate(payload)
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        print(f"Invalid tool input: {exc}")
+        return 1
+
+    result = tool.execute(tool_input)
+    print(result.model_dump_json(indent=2))
+    return 0 if result.success else 1
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="SupportOps Agent Phase 1 CLI")
+    parser = argparse.ArgumentParser(description="SupportOps Agent CLI")
     parser.add_argument("--llm-test", action="store_true", help="Run a safe LLM smoke prompt")
     parser.add_argument("--model", help="Override the configured LLM model")
     parser.add_argument("--list-tools", action="store_true", help="List registered tools")
+    parser.add_argument("--customer", help="Show synthetic customer, orders, and open tickets")
+    parser.add_argument("--order", help="Show synthetic order details")
+    parser.add_argument("--refund-policy", action="store_true", help="Show synthetic refund policy")
+    parser.add_argument("--tool", help="Execute a registered tool with explicit input")
+    parser.add_argument("--input", help="JSON input for --tool")
+    parser.add_argument("--input-file", help="Path to a JSON input file for --tool")
+    parser.add_argument(
+        "--confirm-write",
+        action="store_true",
+        help="Required to execute low-risk or high-risk write tools",
+    )
     parser.add_argument(
         "--tool-test",
         choices=["echo"],
@@ -85,6 +184,14 @@ def main() -> int:
         return run_llm_test(model=args.model)
     if args.list_tools:
         return list_tools(include_demo_tools=args.include_demo_tools)
+    if args.customer:
+        return print_customer(args.customer)
+    if args.order:
+        return print_order(args.order)
+    if args.refund_policy:
+        return print_refund_policy()
+    if args.tool:
+        return run_tool_command(args.tool, args.input, args.input_file, args.confirm_write)
     if args.tool_test:
         return run_tool_test(args.tool_test)
     return print_health(include_demo_tools=args.include_demo_tools)
