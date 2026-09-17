@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 from decimal import Decimal
 from enum import StrEnum
+from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -18,11 +19,11 @@ class PolicyDecision(StrEnum):
 class ProposedAction(BaseModel):
     action_type: str
     tool_name: str
-    arguments: dict[str, str | int | bool] = Field(default_factory=dict)
+    arguments: dict[str, Any] = Field(default_factory=dict)
     risk_level: ToolRiskLevel
     reversible: bool = False
     rollback_tool: str | None = None
-    rollback_arguments: dict[str, str | int | bool] | None = None
+    rollback_arguments: dict[str, Any] | None = None
     estimated_value: Decimal | None = None
 
 

@@ -22,10 +22,14 @@ class OllamaProvider(LLMProvider):
 
     def generate(self, messages: list[ChatMessage], model: str | None = None) -> ChatResponse:
         selected_model = model or self.settings.default_model
+        request_kwargs = {}
+        if any("Return structured JSON only" in message.content for message in messages):
+            request_kwargs["response_format"] = {"type": "json_object"}
         try:
             completion = self.client.chat.completions.create(
                 model=selected_model,
                 messages=[message.as_openai_message() for message in messages],
+                **request_kwargs,
             )
         except APIConnectionError as exc:
             raise LLMUnavailableError("Ollama is unavailable or refused the connection") from exc

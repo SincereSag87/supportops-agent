@@ -4,121 +4,115 @@ A local-first AI support operations agent focused on tool calling, policy enforc
 
 ## Overview
 
-SupportOps Agent is an original portfolio and client-demo project for exploring how AI agents can support operational customer workflows without becoming an unsafe chatbot-only wrapper. Phase 1 built the core agent and tool foundation. Phase 2 adds a completely synthetic Northstar Commerce support backend with deterministic in-memory data, repository abstractions, real support-oriented tools, idempotent refund behavior, and rollback foundations.
+SupportOps Agent is an original portfolio and client-demo project for building an agentic support operations system from first principles. Phase 1 created the core agent and tool contracts. Phase 2 added a deterministic synthetic Northstar Commerce backend. Phase 3 adds the first complete tool-using agent decision loop.
 
-The AI agent does not autonomously select or execute tools yet. Phase 2 allows manual controlled tool execution through the CLI only.
-
-## Why Agentic Support Operations
-
-Support operations often require more than a generated answer. A useful agent must inspect context, propose actions, evaluate risk, route uncertain cases to people, preserve an audit trail, and recover cleanly when tools fail. This project builds those mechanics deliberately before adding orchestration frameworks.
-
-## Project Goals
-
-- Understand customer support requests.
-- Inspect customer and order context through explicit tools.
-- Select tools through structured contracts.
-- Check proposed actions against policy.
-- Request human approval for risky actions.
-- Execute safe actions only when allowed.
-- Escalate when uncertain or unsafe.
-- Maintain audit events for every important step.
-- Support deterministic evaluation and failure recovery.
+The agent can now ask an LLM for one structured decision at a time, validate requested tools, apply runtime safety rules, execute allowed tools, observe results, and continue until completion, escalation, approval required, failure, or max steps.
 
 ## Architecture
 
-Current Phase 2 data flow:
+Phase 3 decision loop:
 
 ```mermaid
 flowchart TD
-    A[CLI / Future Agent] --> B[Tool Registry]
+    A[User] --> B[AgentRunner]
+    B --> C[LLM]
+    C --> D[AgentDecision]
+    D --> E[Tool Validation]
+    E --> F[Safety Controller]
+    F --> G[READ_ONLY Execute]
+    F --> H[LOW_RISK_WRITE Execute if enabled]
+    F --> I[HIGH_RISK_WRITE Await Approval]
+    G --> J[ToolResult]
+    H --> J
+    I --> K[ProposedAction]
+    J --> L[Agent State]
+    L --> M[Next Step / Final]
+```
+
+Synthetic backend flow:
+
+```mermaid
+flowchart TD
+    A[CLI / AgentRunner] --> B[Tool Registry]
     B --> C[Support Tools]
     C --> D[SupportService]
     D --> E[Repositories]
     E --> F[Synthetic In-Memory Data]
-
-    G[Future Phase 3 LLM] -.-> H[Tool Selection]
-    H -.-> B
 ```
 
-Future target loop:
+## Why The LLM Does Not Directly Execute Tools
 
-```mermaid
-flowchart TD
-    A[Support Request] --> B[Agent]
-    B --> C[Tool Proposal]
-    C --> D[Policy Check]
-    D --> E[Allow]
-    D --> F[Approval]
-    D --> G[Deny]
-    D --> H[Escalate]
-    E --> I[Tool Execution]
-    F --> I
-    I --> J[Audit Trail]
-    G --> J
-    H --> J
-    J --> K[Response]
+The model only proposes a structured `AgentDecision`. The runtime is the execution boundary:
+
+- validates the tool exists
+- validates arguments with the tool input model
+- checks tool risk level
+- decides whether execution is allowed
+- blocks high-risk writes from automatic execution
+
+Prompt instructions are not a security boundary. Runtime safety enforcement is the security boundary. Even if the LLM requests `issue_refund`, the Phase 3 runtime refuses automatic execution and returns an approval-required result.
+
+## Agent Decision Schema
+
+The LLM must return JSON only. Supported decisions:
+
+- `tool_call`
+- `final_response`
+- `escalate`
+- `fail`
+
+Each decision includes a short `reasoning_summary`. This is an externally safe rationale, not private step-by-step reasoning or hidden chain-of-thought.
+
+Example:
+
+```json
+{
+  "decision_type": "tool_call",
+  "reasoning_summary": "The order must be retrieved before answering the status question.",
+  "tool_name": "order_lookup",
+  "tool_arguments": {
+    "order_id": "ORD-1001"
+  }
+}
 ```
+
+## Runtime Safety Gate
+
+Tool risk behavior:
+
+| Risk | Phase 3 Behavior |
+| --- | --- |
+| `READ_ONLY` | Executes automatically |
+| `LOW_RISK_WRITE` | Executes only when `AGENT_ALLOW_LOW_RISK_WRITES=true` |
+| `HIGH_RISK_WRITE` | Never auto-executes; creates `ProposedAction` and awaits approval |
+
+High-risk tools currently include `issue_refund` and `reverse_refund`.
+
+## Agent Loop Controls
+
+- `AGENT_MAX_STEPS=8` prevents infinite loops.
+- `AGENT_MAX_CONTEXT_CHARS=16000` bounds prompt context.
+- `AGENT_MAX_IDENTICAL_TOOL_CALLS=2` catches repeated identical tool loops.
+- Tool failures become safe observations instead of crashing the runner.
+- Malformed model decisions fail safely with a structured error.
+
+## Safe Execution Traces
+
+The CLI can show a decision trace with `--show-trace`. It includes step number, decision type, safe reasoning summary, tool name, and result status. It does not print private chain-of-thought.
 
 ## Synthetic Support Backend
 
-Phase 2 introduces fictional Northstar Commerce records only:
-
-- Customers
-- Orders and order items
-- Support tickets
-- Refund records
-- Refund policy data
-
-All normal CLI runs start from deterministic seed data. Writes mutate in-memory state only inside the current process.
-
-## Domain Model Overview
-
-- `Customer`: synthetic customer identity, status, and metadata.
-- `Order`: customer order with Decimal monetary values, delivery state, refund totals, and remaining refundable amount.
-- `SupportTicket`: ticket state, priority, resolution, and customer/order association.
-- `RefundRecord`: completed refund or reversal record with idempotency key and rollback relationship fields.
-- `RefundPolicy`: stored synthetic policy data for return windows, refund thresholds, and allowed reasons.
-
-## Fictional Dataset
-
-Key records include:
+The backend remains fictional and deterministic:
 
 - Jordan Lee, `CUS-1001`, `jordan.lee@example.test`
 - `ORD-1001`, Wireless Headphones, `79.99 USD`, delivered on `2026-09-12`
-- Morgan Chen, `CUS-1002`, with `ORD-1002`, Laptop Docking Station, `299.99 USD`
-- A high-value `749.99 USD` order for future escalation scenarios
-- An order outside the 30-day return window
+- Morgan Chen, `CUS-1002`, `ORD-1002`, Laptop Docking Station, `299.99 USD`
+- A high-value `749.99 USD` order for escalation scenarios
+- An older delivered order outside the return-window scenario
 - A shipped but not delivered order
 - A multi-item order for future partial refund logic
 
-The example request remains: "My headphones arrived damaged. Can I get a refund?"
-
-## Repository Abstractions
-
-The backend uses repository interfaces for customers, orders, tickets, refunds, and policies. Phase 2 ships deterministic in-memory implementations:
-
-- `InMemoryCustomerRepository`
-- `InMemoryOrderRepository`
-- `InMemoryTicketRepository`
-- `InMemoryRefundRepository`
-- `InMemoryPolicyRepository`
-
-Repositories return copies and do not expose internal dictionaries to callers.
-
-## SupportService
-
-`SupportService` provides deterministic business-data access and controlled mutations:
-
-- Customer lookup by ID or email
-- Order lookup and customer order listing
-- Ticket lookup and customer ticket listing
-- Refund policy lookup
-- Refund history lookup
-- Ticket creation and status updates
-- Controlled refund issuance
-- Controlled refund reversal
-
-No LLM logic lives in this service.
+All normal CLI runs start from seeded in-memory state.
 
 ## Support Tools
 
@@ -132,56 +126,58 @@ No LLM logic lives in this service.
 | `ticket_lookup` | READ_ONLY | Fetch a support ticket |
 | `create_ticket` | LOW_RISK_WRITE | Create a synthetic support ticket |
 | `update_ticket_status` | LOW_RISK_WRITE | Update synthetic ticket status |
-| `issue_refund` | HIGH_RISK_WRITE | Issue controlled synthetic refund |
-| `reverse_refund` | HIGH_RISK_WRITE | Create a synthetic refund reversal record |
+| `issue_refund` | HIGH_RISK_WRITE | Propose a controlled synthetic refund |
+| `reverse_refund` | HIGH_RISK_WRITE | Propose a synthetic refund reversal |
 
-`EchoTool` remains tests-only and is not registered in the default support registry.
+## CLI
 
-## Read vs Write Risk
+Run the agent:
 
-Read tools can be called from the CLI without confirmation. Write tools require `--confirm-write` when using the generic `--tool` command. This prevents accidental ticket updates or refund simulations during manual testing.
+```bash
+uv run python -m app.main --agent "What is the status of my order ORD-1001?" --customer-id CUS-1001 --show-trace
+```
 
-## Idempotency
+Run with model override:
 
-`issue_refund` requires an idempotency key. Reusing the same key with the same inputs returns the existing refund and does not change monetary totals again. Reusing a key with conflicting inputs raises a clean domain error.
+```bash
+uv run python -m app.main --agent "My headphones arrived damaged. Can I get a refund?" --customer-id CUS-1001 --model gemma3 --show-trace
+```
 
-## Refund Integrity
+JSON output:
 
-Refund simulation enforces data-integrity rules:
+```bash
+uv run python -m app.main --agent "What is the status of my order ORD-1001?" --customer-id CUS-1001 --output json
+```
 
-- Order must exist.
-- Amount must be greater than zero.
-- Amount cannot exceed remaining refundable amount.
-- Non-refundable order states are rejected.
-- Completed refunds update `refund_total`.
-- Full refunds set order status to `refunded`.
-- Partial refunds set order status to `partially_refunded`.
-- Decimal is used for all money values.
+Support backend commands:
 
-Policy thresholds are stored and visible but are not centrally enforced yet. Policy enforcement comes in Phase 4.
+```bash
+uv run python -m app.main --list-tools
+uv run python -m app.main --customer CUS-1001
+uv run python -m app.main --order ORD-1001
+uv run python -m app.main --refund-policy
+```
 
-## Rollback / Reversal Foundation
+Manual controlled tool execution still requires `--confirm-write` for write tools.
 
-`reverse_refund` creates an audit-friendly reversal record and links the original refund through `reversed_by_refund_id`. It restores the order refund total without deleting financial history. Double reversal is prevented.
+## Current Phase 3 Capabilities
 
-## Policy Decisions
+- Structured `AgentDecision` model.
+- JSON-only parser with fenced JSON support and clean parse errors.
+- Prompt builder with tool schemas and runtime safety instructions.
+- Bounded context builder preserving the original request and recent observations.
+- AgentRunner with tool validation, safety checks, observations, max-step guard, and duplicate-call protection.
+- AgentService for high-level request handling.
+- CLI support for agent runs, JSON output, and safe execution traces.
+- Tests proving high-risk refund tools cannot execute automatically.
 
-Policy models currently support:
+## Known Limitations
 
-- `ALLOW`
-- `REQUIRE_APPROVAL`
-- `DENY`
-- `ESCALATE`
-
-The policy engine itself is planned for a later phase.
-
-## Human Approval
-
-Approval models define pending, approved, denied, and expired decisions. They are ready for future human-in-the-loop workflows, but no approval execution service is included in Phase 2.
-
-## Audit Trail
-
-Audit event models are append-only style domain objects for request receipt, model calls, tool selection, tool execution, policy checks, approvals, escalation, completion, and failure. Persistence is planned for a later phase.
+- No centralized policy engine yet.
+- No human approval execution workflow yet.
+- No persistent audit log yet.
+- No FastAPI or Gradio UI yet.
+- LLM output quality depends on the local model, but malformed output is handled safely.
 
 ## Technology Stack
 
@@ -207,120 +203,22 @@ Development:
 uv sync
 uv run pytest
 uv run ruff check .
-uv run python -m app.main --list-tools
+uv run python -m app.main --agent "What is the status of my order ORD-1001?" --customer-id CUS-1001 --show-trace
 ```
-
-Create a local `.env` from `.env.example` if you want to override defaults.
-
-## CLI
-
-Health check:
-
-```bash
-uv run python -m app.main
-```
-
-List support tools:
-
-```bash
-uv run python -m app.main --list-tools
-```
-
-Customer lookup:
-
-```bash
-uv run python -m app.main --customer CUS-1001
-```
-
-Order lookup:
-
-```bash
-uv run python -m app.main --order ORD-1001
-```
-
-Refund policy:
-
-```bash
-uv run python -m app.main --refund-policy
-```
-
-Safe read tool call:
-
-```bash
-uv run python -m app.main --tool customer_lookup --input "{\"customer_id\":\"CUS-1001\"}"
-```
-
-Controlled write tool call:
-
-```bash
-uv run python -m app.main --tool issue_refund --input "{\"order_id\":\"ORD-1001\",\"amount\":\"10.00\",\"reason\":\"damaged\",\"idempotency_key\":\"refund-ORD-1001-demo-001\"}" --confirm-write
-```
-
-Without `--confirm-write`, write tools refuse execution.
-
-Safe LLM smoke prompt with the default model:
-
-```bash
-uv run python -m app.main --llm-test
-```
-
-Safe LLM smoke prompt with model override:
-
-```bash
-uv run python -m app.main --llm-test --model gemma3
-```
-
-## Current Phase 2 Capabilities
-
-- Phase 1 agent and tool foundation.
-- Synthetic Northstar Commerce support backend.
-- Deterministic in-memory repository implementations.
-- Customer, order, ticket, refund, and policy models.
-- SupportService for deterministic data access and controlled mutations.
-- Real support tools registered through the existing ToolRegistry.
-- Manual CLI tool execution with write confirmation gates.
-- Idempotent refund behavior.
-- Refund reversal foundation.
-- Comprehensive unit tests that do not require live Ollama, internet, external APIs, or databases.
 
 ## Planned Roadmap
 
 1. Agent foundation & tool contracts [x]
 2. Synthetic support backend [x]
-3. Tool calling & agent decision loop
+3. Tool calling & agent decision loop [x]
 4. Policy enforcement, approvals & audit trail
 5. Agent evaluation & failure recovery
 6. FastAPI backend
 7. Gradio operations console
 8. Observability, deployment & portfolio release
 
-## Client Demo Direction
-
-The eventual synthetic demo will use:
-
-- Customer: Jordan Lee
-- Order: ORD-1001
-- Product: Wireless Headphones
-- Order value: $79.99
-- Possible request: "My headphones arrived damaged. Can I get a refund?"
-
-Future behavior:
-
-- Look up customer.
-- Look up order.
-- Inspect refund policy.
-- Determine risk.
-- Propose refund.
-- Auto-execute if below the configured threshold and policy allows.
-- Require approval for larger refunds.
-- Audit every step.
-
-The synthetic backend now exists, but the autonomous agent decision loop is not implemented in Phase 2.
-
 ## Security / Privacy
 
-All records are synthetic. Do not include real customer names tied to private data, real email addresses, real orders, support tickets, payment information, authentication secrets, or payment processor credentials.
+All records are synthetic. The project uses `example.test` email addresses only. Refund behavior is simulated in memory. No card data, payment processor integration, database, external support API, authentication secret, or real customer data is used.
 
-The project uses `example.test` email addresses only. Refund behavior is simulated in memory. No card data, payment processor integration, database, or external support API is used.
-
-The repository ignores `.env`, `.venv/`, caches, `runtime/`, `data/`, and log files.
+Do not commit `.env`, `.venv/`, logs, model caches, runtime audit data, secrets, or unrelated files.

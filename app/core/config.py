@@ -12,6 +12,13 @@ class Settings(BaseSettings):
     ollama_base_url: str = Field(default="http://localhost:11434/v1", alias="OLLAMA_BASE_URL")
     default_model: str = Field(default="llama3.2", alias="DEFAULT_MODEL")
     agent_max_steps: int = Field(default=8, alias="AGENT_MAX_STEPS")
+    agent_max_context_chars: int = Field(default=16000, alias="AGENT_MAX_CONTEXT_CHARS")
+    agent_max_identical_tool_calls: int = Field(
+        default=2, alias="AGENT_MAX_IDENTICAL_TOOL_CALLS"
+    )
+    agent_allow_low_risk_writes: bool = Field(
+        default=True, alias="AGENT_ALLOW_LOW_RISK_WRITES"
+    )
     auto_action_limit: Decimal = Field(default=Decimal("100.00"), alias="AUTO_ACTION_LIMIT")
     approval_action_limit: Decimal = Field(
         default=Decimal("500.00"), alias="APPROVAL_ACTION_LIMIT"
@@ -22,6 +29,13 @@ class Settings(BaseSettings):
     def validate_agent_max_steps(cls, value: int) -> int:
         if value <= 0:
             raise ValueError("AGENT_MAX_STEPS must be greater than 0")
+        return value
+
+    @field_validator("agent_max_context_chars", "agent_max_identical_tool_calls")
+    @classmethod
+    def validate_positive_agent_limits(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("agent limits must be greater than 0")
         return value
 
     @field_validator("auto_action_limit", "approval_action_limit")

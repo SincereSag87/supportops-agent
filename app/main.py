@@ -2,11 +2,14 @@ import argparse
 import json
 from pathlib import Path
 
+from app.agent.runner import AgentRunner
+from app.agent.safety import AgentSafetyController
 from app.core.config import get_settings
 from app.domain.tickets import TicketStatus
 from app.llm.base import LLMProviderError
 from app.llm.models import ChatMessage, ChatRole
 from app.llm.ollama_provider import OllamaProvider
+from app.services.agent_service import AgentService
 from app.services.health_service import HealthService
 from app.support.service import create_demo_support_service
 from app.tools.demo import EchoTool, EchoToolInput
@@ -152,10 +155,70 @@ def run_tool_command(
     return 0 if result.success else 1
 
 
+def build_agent_service() -> AgentService:
+    settings = get_settings()
+    support_service = create_demo_support_service()
+    registry = create_support_tool_registry(support_service)
+    runner = AgentRunner(
+        llm_provider=OllamaProvider(settings),
+        tool_registry=registry,
+        safety_controller=AgentSafetyController(settings),
+        settings=settings,
+    )
+    return AgentService(runner)
+
+
+def run_agent_command(
+    user_input: str,
+    customer_id: str | None,
+    model: str | None,
+    output: str | None,
+    show_trace: bool,
+) -> int:
+    result = build_agent_service().handle_request(user_input, customer_id=customer_id, model=model)
+    if output == "json":
+        print(result.model_dump_json(indent=2))
+        return 0 if result.error is None else 1
+
+    print(f"Request ID: {result.request_id}")
+    print(f"Status: {result.status.value}")
+    print(f"Steps: {len(result.decision_history)}")
+    print(f"Response: {result.response}")
+    print("Tool Calls:")
+    for index, call in enumerate(result.tool_calls, start=1):
+        print(f"{index}. {call.tool_name} {call.arguments}")
+    if result.approvals_required:
+        approval = result.approvals_required[0]
+        action = approval.action
+        print("Pending Action:")
+        print(f"Tool: {action.tool_name}")
+        print(f"Arguments: {action.arguments}")
+        print(f"Risk: {action.risk_level.name}")
+        print("Approval Required: Yes")
+    if show_trace:
+        print("Execution Trace:")
+        for index, decision in enumerate(result.decision_history, start=1):
+            print(f"Step {index}")
+            print(f"Decision: {decision.decision_type.value}")
+            print(f"Reason: {decision.reasoning_summary}")
+            if decision.tool_name:
+                matching = [
+                    item for item in result.tool_results if item.tool_name == decision.tool_name
+                ]
+                success = matching[-1].success if matching else None
+                print(f"Tool: {decision.tool_name}")
+                print(f"Result: {success if success is not None else 'not executed'}")
+    return 0 if result.error is None else 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="SupportOps Agent CLI")
     parser.add_argument("--llm-test", action="store_true", help="Run a safe LLM smoke prompt")
     parser.add_argument("--model", help="Override the configured LLM model")
+    parser.add_argument("--agent", help="Run the Phase 3 tool-using agent loop")
+    parser.add_argument("--customer-id", help="Synthetic customer id for --agent")
+    parser.add_argument("--output", choices=["text", "json"], default="text")
+    parser.add_argument("--show-trace", action="store_true", help="Show safe execution trace")
     parser.add_argument("--list-tools", action="store_true", help="List registered tools")
     parser.add_argument("--customer", help="Show synthetic customer, orders, and open tickets")
     parser.add_argument("--order", help="Show synthetic order details")
@@ -180,6 +243,14 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    if args.agent:
+        return run_agent_command(
+            user_input=args.agent,
+            customer_id=args.customer_id,
+            model=args.model,
+            output=args.output,
+            show_trace=args.show_trace,
+        )
     if args.llm_test:
         return run_llm_test(model=args.model)
     if args.list_tools:
