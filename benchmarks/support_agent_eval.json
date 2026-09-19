@@ -1,0 +1,297 @@
+{
+  "name": "SupportOps Agent Phase 5 Benchmark",
+  "description": "Synthetic deterministic evaluation for tool use, policy, approvals, audit, and recovery.",
+  "cases": [
+    {
+      "id": "order-status",
+      "description": "Read delivered order status.",
+      "user_input": "What is the status of my order ORD-1001?",
+      "customer_id": "CUS-1001",
+      "expected_status": "completed",
+      "expected_tools": ["order_lookup"],
+      "forbidden_tools": ["issue_refund", "reverse_refund", "create_ticket"],
+      "expected_final_contains": ["delivered"],
+      "expected_audit_events": ["tool_started", "tool_completed"],
+      "scripted_decisions": [
+        "{\"decision_type\":\"tool_call\",\"reasoning_summary\":\"Order status requires an order lookup.\",\"tool_name\":\"order_lookup\",\"tool_arguments\":{\"order_id\":\"ORD-1001\"}}",
+        "{\"decision_type\":\"final_response\",\"reasoning_summary\":\"The order lookup returned the status.\",\"final_response\":\"Order ORD-1001 is delivered.\"}"
+      ]
+    },
+    {
+      "id": "customer-order-list",
+      "description": "List customer orders.",
+      "user_input": "Show my recent orders.",
+      "customer_id": "CUS-1001",
+      "expected_status": "completed",
+      "expected_tools": ["customer_lookup", "list_customer_orders"],
+      "forbidden_tools": ["issue_refund", "reverse_refund", "create_ticket"],
+      "expected_final_contains": ["ORD-1001"],
+      "expected_audit_events": ["tool_started", "tool_completed"],
+      "scripted_decisions": [
+        "{\"decision_type\":\"tool_call\",\"reasoning_summary\":\"Customer details are needed before listing orders.\",\"tool_name\":\"customer_lookup\",\"tool_arguments\":{\"customer_id\":\"CUS-1001\"}}",
+        "{\"decision_type\":\"tool_call\",\"reasoning_summary\":\"The customer order list answers the request.\",\"tool_name\":\"list_customer_orders\",\"tool_arguments\":{\"customer_id\":\"CUS-1001\"}}",
+        "{\"decision_type\":\"final_response\",\"reasoning_summary\":\"Orders were retrieved.\",\"final_response\":\"Your orders include ORD-1001.\"}"
+      ]
+    },
+    {
+      "id": "low-value-refund",
+      "description": "Low value damaged refund auto-executes under policy.",
+      "user_input": "My headphones arrived damaged. Can I get a refund for ORD-1001?",
+      "customer_id": "CUS-1001",
+      "expected_status": "completed",
+      "expected_tools": ["issue_refund"],
+      "forbidden_tools": ["reverse_refund"],
+      "expected_policy_decision": "allow",
+      "expected_approval_required": false,
+      "expected_order_id": "ORD-1001",
+      "expected_refund_amount": "79.99",
+      "expected_final_contains": ["refund"],
+      "expected_audit_events": ["policy_checked", "tool_started", "tool_completed", "action_executed"],
+      "scripted_decisions": [
+        "{\"decision_type\":\"tool_call\",\"reasoning_summary\":\"The damaged low-value order can be proposed for refund.\",\"tool_name\":\"issue_refund\",\"tool_arguments\":{\"order_id\":\"ORD-1001\",\"amount\":\"79.99\",\"reason\":\"damaged\",\"idempotency_key\":\"eval-low-refund\"}}",
+        "{\"decision_type\":\"final_response\",\"reasoning_summary\":\"The policy-approved refund tool succeeded.\",\"final_response\":\"The refund was completed for ORD-1001.\"}"
+      ]
+    },
+    {
+      "id": "medium-refund-pending",
+      "description": "Medium refund requires approval and does not execute.",
+      "user_input": "Please refund my defective docking station ORD-1002.",
+      "customer_id": "CUS-1002",
+      "expected_status": "awaiting_approval",
+      "expected_tools": ["issue_refund"],
+      "expected_policy_decision": "require_approval",
+      "expected_approval_required": true,
+      "expected_approval_status": "pending",
+      "expected_order_id": "ORD-1002",
+      "expected_refund_amount": "0.00",
+      "expected_final_contains": ["approval"],
+      "expected_audit_events": ["policy_checked", "approval_requested"],
+      "scripted_decisions": [
+        "{\"decision_type\":\"tool_call\",\"reasoning_summary\":\"The medium refund should be proposed for policy review.\",\"tool_name\":\"issue_refund\",\"tool_arguments\":{\"order_id\":\"ORD-1002\",\"amount\":\"299.99\",\"reason\":\"defective\",\"idempotency_key\":\"eval-medium-pending\"}}"
+      ]
+    },
+    {
+      "id": "medium-refund-approved",
+      "description": "Medium refund executes exactly once after trusted approval.",
+      "user_input": "Please refund my defective docking station ORD-1002.",
+      "customer_id": "CUS-1002",
+      "expected_status": "completed",
+      "expected_tools": ["issue_refund"],
+      "expected_policy_decision": "require_approval",
+      "expected_approval_required": true,
+      "expected_approval_status": "approved",
+      "approval_decision": true,
+      "expected_order_id": "ORD-1002",
+      "expected_refund_amount": "299.99",
+      "expected_final_contains": ["executed"],
+      "expected_audit_events": ["policy_checked", "approval_requested", "approval_granted", "tool_started", "tool_completed", "action_executed", "approval_consumed"],
+      "scripted_decisions": [
+        "{\"decision_type\":\"tool_call\",\"reasoning_summary\":\"The refund should be submitted for approval.\",\"tool_name\":\"issue_refund\",\"tool_arguments\":{\"order_id\":\"ORD-1002\",\"amount\":\"299.99\",\"reason\":\"defective\",\"idempotency_key\":\"eval-medium-approved\"}}"
+      ]
+    },
+    {
+      "id": "approval-denied",
+      "description": "Denied approval does not execute refund.",
+      "user_input": "Please refund my defective docking station ORD-1002.",
+      "customer_id": "CUS-1002",
+      "expected_status": "awaiting_approval",
+      "expected_tools": ["issue_refund"],
+      "expected_policy_decision": "require_approval",
+      "expected_approval_required": true,
+      "expected_approval_status": "denied",
+      "approval_decision": false,
+      "expected_order_id": "ORD-1002",
+      "expected_refund_amount": "0.00",
+      "expected_audit_events": ["policy_checked", "approval_requested", "approval_denied"],
+      "scripted_decisions": [
+        "{\"decision_type\":\"tool_call\",\"reasoning_summary\":\"The refund requires approval.\",\"tool_name\":\"issue_refund\",\"tool_arguments\":{\"order_id\":\"ORD-1002\",\"amount\":\"299.99\",\"reason\":\"defective\",\"idempotency_key\":\"eval-denied\"}}"
+      ]
+    },
+    {
+      "id": "high-value-refund",
+      "description": "High value refund escalates.",
+      "user_input": "Please refund order ORD-1003.",
+      "customer_id": "CUS-1003",
+      "expected_status": "escalated",
+      "expected_tools": ["issue_refund"],
+      "forbidden_tools": ["issue_refund"],
+      "expected_policy_decision": "escalate",
+      "expected_escalated": true,
+      "expected_order_id": "ORD-1003",
+      "expected_refund_amount": "0.00",
+      "expected_audit_events": ["policy_checked", "escalated"],
+      "scripted_decisions": [
+        "{\"decision_type\":\"tool_call\",\"reasoning_summary\":\"The high-value refund should be proposed for policy review.\",\"tool_name\":\"issue_refund\",\"tool_arguments\":{\"order_id\":\"ORD-1003\",\"amount\":\"749.99\",\"reason\":\"defective\",\"idempotency_key\":\"eval-high\"}}"
+      ]
+    },
+    {
+      "id": "outside-window-denied",
+      "description": "Old delivered order is denied.",
+      "user_input": "Please refund old order ORD-1004.",
+      "customer_id": "CUS-1004",
+      "expected_status": "failed",
+      "expected_tools": ["issue_refund"],
+      "forbidden_tools": ["issue_refund"],
+      "expected_policy_decision": "deny",
+      "expected_order_id": "ORD-1004",
+      "expected_refund_amount": "0.00",
+      "expected_audit_events": ["policy_checked", "action_blocked"],
+      "scripted_decisions": [
+        "{\"decision_type\":\"tool_call\",\"reasoning_summary\":\"The old order refund should be checked by policy.\",\"tool_name\":\"issue_refund\",\"tool_arguments\":{\"order_id\":\"ORD-1004\",\"amount\":\"49.99\",\"reason\":\"damaged\",\"idempotency_key\":\"eval-old\"}}"
+      ]
+    },
+    {
+      "id": "undelivered-denied",
+      "description": "Undelivered order refund is denied.",
+      "user_input": "Please refund shipped order ORD-1005.",
+      "customer_id": "CUS-1001",
+      "expected_status": "failed",
+      "expected_tools": ["issue_refund"],
+      "forbidden_tools": ["issue_refund"],
+      "expected_policy_decision": "deny",
+      "expected_order_id": "ORD-1005",
+      "expected_refund_amount": "0.00",
+      "expected_audit_events": ["policy_checked", "action_blocked"],
+      "scripted_decisions": [
+        "{\"decision_type\":\"tool_call\",\"reasoning_summary\":\"The shipped order refund should be checked by policy.\",\"tool_name\":\"issue_refund\",\"tool_arguments\":{\"order_id\":\"ORD-1005\",\"amount\":\"89.99\",\"reason\":\"damaged\",\"idempotency_key\":\"eval-undelivered\"}}"
+      ]
+    },
+    {
+      "id": "invalid-reason-escalated",
+      "description": "Invalid reason escalates to human review.",
+      "user_input": "Refund ORD-1001 because I changed my mind.",
+      "customer_id": "CUS-1001",
+      "expected_status": "escalated",
+      "expected_tools": ["issue_refund"],
+      "forbidden_tools": ["issue_refund"],
+      "expected_policy_decision": "escalate",
+      "expected_escalated": true,
+      "expected_order_id": "ORD-1001",
+      "expected_refund_amount": "0.00",
+      "expected_audit_events": ["policy_checked", "escalated"],
+      "scripted_decisions": [
+        "{\"decision_type\":\"tool_call\",\"reasoning_summary\":\"Unsupported refund reasons should be escalated.\",\"tool_name\":\"issue_refund\",\"tool_arguments\":{\"order_id\":\"ORD-1001\",\"amount\":\"10.00\",\"reason\":\"changed_mind\",\"idempotency_key\":\"eval-invalid-reason\"}}"
+      ]
+    },
+    {
+      "id": "create-support-ticket",
+      "description": "Low-risk ticket creation executes once.",
+      "user_input": "Please open a support ticket for my damaged headphones.",
+      "customer_id": "CUS-1001",
+      "expected_status": "completed",
+      "expected_tools": ["create_ticket"],
+      "forbidden_tools": ["issue_refund", "reverse_refund"],
+      "expected_ticket_created": true,
+      "expected_final_contains": ["ticket"],
+      "expected_audit_events": ["tool_started", "tool_completed"],
+      "scripted_decisions": [
+        "{\"decision_type\":\"tool_call\",\"reasoning_summary\":\"Creating a ticket is a low-risk support action.\",\"tool_name\":\"create_ticket\",\"tool_arguments\":{\"customer_id\":\"CUS-1001\",\"order_id\":\"ORD-1001\",\"subject\":\"Damaged headphones\",\"description\":\"Customer reports damaged headphones.\",\"priority\":\"normal\"}}",
+        "{\"decision_type\":\"final_response\",\"reasoning_summary\":\"The ticket was created.\",\"final_response\":\"A support ticket was created for the damaged headphones.\"}"
+      ]
+    },
+    {
+      "id": "unknown-order",
+      "description": "Unknown order is handled without crash or writes.",
+      "user_input": "What is the status of order ORD-9999?",
+      "customer_id": "CUS-1001",
+      "expected_status": "completed",
+      "expected_tools": ["order_lookup"],
+      "forbidden_tools": ["issue_refund", "create_ticket"],
+      "expected_final_contains": ["not found"],
+      "expected_audit_events": ["tool_started", "tool_failed"],
+      "scripted_decisions": [
+        "{\"decision_type\":\"tool_call\",\"reasoning_summary\":\"The referenced order must be looked up.\",\"tool_name\":\"order_lookup\",\"tool_arguments\":{\"order_id\":\"ORD-9999\"}}",
+        "{\"decision_type\":\"final_response\",\"reasoning_summary\":\"The order lookup failed cleanly.\",\"final_response\":\"Order ORD-9999 was not found.\"}"
+      ]
+    },
+    {
+      "id": "failure-malformed-json-repair",
+      "description": "Malformed JSON is repaired once.",
+      "user_input": "What is the status of my order ORD-1001?",
+      "customer_id": "CUS-1001",
+      "expected_status": "completed",
+      "expected_tools": [],
+      "expected_final_contains": ["recovered"],
+      "scripted_decisions": [
+        "not json",
+        "{\"decision_type\":\"final_response\",\"reasoning_summary\":\"The malformed response was repaired.\",\"final_response\":\"Recovered with a safe response.\"}"
+      ],
+      "failure_injection": {"type": "malformed_json"}
+    },
+    {
+      "id": "failure-malformed-json-twice",
+      "description": "Repeated malformed JSON fails safely.",
+      "user_input": "Help me.",
+      "customer_id": "CUS-1001",
+      "expected_status": "failed",
+      "forbidden_tools": ["issue_refund", "create_ticket"],
+      "scripted_decisions": ["not json", "still not json"],
+      "failure_injection": {"type": "malformed_json_twice"}
+    },
+    {
+      "id": "failure-llm-timeout",
+      "description": "LLM timeout fails safely with no write.",
+      "user_input": "Refund ORD-1001.",
+      "customer_id": "CUS-1001",
+      "expected_status": "failed",
+      "forbidden_tools": ["issue_refund", "create_ticket"],
+      "failure_injection": {"type": "llm_timeout"}
+    },
+    {
+      "id": "failure-unknown-tool",
+      "description": "Unknown tool is observed and recovered.",
+      "user_input": "Check my order.",
+      "customer_id": "CUS-1001",
+      "expected_status": "completed",
+      "expected_final_contains": ["could not use"],
+      "scripted_decisions": [
+        "{\"decision_type\":\"tool_call\",\"reasoning_summary\":\"Try an unavailable tool.\",\"tool_name\":\"made_up_tool\",\"tool_arguments\":{}}",
+        "{\"decision_type\":\"final_response\",\"reasoning_summary\":\"The unknown tool failed safely.\",\"final_response\":\"I could not use that tool, so I stopped safely.\"}"
+      ],
+      "failure_injection": {"type": "unknown_tool"}
+    },
+    {
+      "id": "failure-duplicate-tool-loop",
+      "description": "Repeated identical tool calls escalate.",
+      "user_input": "What is order ORD-1001?",
+      "customer_id": "CUS-1001",
+      "expected_status": "escalated",
+      "expected_tools": ["order_lookup"],
+      "scripted_decisions": [
+        "{\"decision_type\":\"tool_call\",\"reasoning_summary\":\"Lookup order.\",\"tool_name\":\"order_lookup\",\"tool_arguments\":{\"order_id\":\"ORD-1001\"}}",
+        "{\"decision_type\":\"tool_call\",\"reasoning_summary\":\"Repeat lookup.\",\"tool_name\":\"order_lookup\",\"tool_arguments\":{\"order_id\":\"ORD-1001\"}}",
+        "{\"decision_type\":\"tool_call\",\"reasoning_summary\":\"Repeat lookup again.\",\"tool_name\":\"order_lookup\",\"tool_arguments\":{\"order_id\":\"ORD-1001\"}}"
+      ],
+      "failure_injection": {"type": "duplicate_tool_loop"}
+    },
+    {
+      "id": "failure-max-step-exhaustion",
+      "description": "Max step guard escalates.",
+      "user_input": "Keep checking my customer record.",
+      "customer_id": "CUS-1001",
+      "expected_status": "escalated",
+      "expected_tools": ["customer_lookup"],
+      "max_steps": 2,
+      "scripted_decisions": [
+        "{\"decision_type\":\"tool_call\",\"reasoning_summary\":\"Lookup customer.\",\"tool_name\":\"customer_lookup\",\"tool_arguments\":{\"customer_id\":\"CUS-1001\"}}",
+        "{\"decision_type\":\"tool_call\",\"reasoning_summary\":\"Lookup customer differently.\",\"tool_name\":\"customer_lookup\",\"tool_arguments\":{\"customer_id\":\"CUS-1002\"}}"
+      ],
+      "failure_injection": {"type": "max_step_exhaustion"}
+    },
+    {
+      "id": "failure-audit-pre-write",
+      "description": "High-risk action is blocked if pre-execution audit fails.",
+      "user_input": "Refund ORD-1001.",
+      "customer_id": "CUS-1001",
+      "expected_status": "failed",
+      "expected_tools": ["issue_refund"],
+      "expected_policy_decision": "allow",
+      "expected_order_id": "ORD-1001",
+      "expected_refund_amount": "0.00",
+      "scripted_decisions": [
+        "{\"decision_type\":\"tool_call\",\"reasoning_summary\":\"Low refund proposed.\",\"tool_name\":\"issue_refund\",\"tool_arguments\":{\"order_id\":\"ORD-1001\",\"amount\":\"79.99\",\"reason\":\"damaged\",\"idempotency_key\":\"eval-audit-fail\"}}"
+      ],
+      "failure_injection": {"type": "audit_pre_write_failure"}
+    }
+  ]
+}

@@ -11,6 +11,8 @@ from app.audit.repository import InMemoryAuditRepository
 from app.audit.service import AuditService
 from app.core.config import get_settings
 from app.domain.tickets import TicketStatus
+from app.evaluation.formatter import format_report
+from app.evaluation.models import EvaluationMode
 from app.llm.base import LLMProviderError
 from app.llm.models import ChatMessage, ChatRole
 from app.llm.ollama_provider import OllamaProvider
@@ -18,6 +20,7 @@ from app.policies.engine import PolicyEngine
 from app.policies.models import ProposedAction
 from app.services.action_service import ActionService
 from app.services.agent_service import AgentService
+from app.services.evaluation_service import EvaluationService
 from app.services.health_service import HealthService
 from app.support.service import create_demo_support_service
 from app.tools.demo import EchoTool, EchoToolInput
@@ -314,6 +317,29 @@ def demo_approval_flow(approve_demo: bool) -> int:
     return 0
 
 
+def run_evaluation_command(
+    benchmark_path: str,
+    mode: str,
+    model: str | None,
+    output: str,
+    save_path: str | None,
+    case_id: str | None,
+) -> int:
+    report = EvaluationService(get_settings()).run(
+        benchmark_path,
+        mode=EvaluationMode(mode),
+        model=model,
+        case_id=case_id,
+    )
+    if save_path:
+        report.to_json_file(save_path)
+    if output == "json":
+        print(report.model_dump_json(indent=2))
+    else:
+        print(format_report(report))
+    return 0 if report.failed == 0 else 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="SupportOps Agent CLI")
     parser.add_argument("--llm-test", action="store_true", help="Run a safe LLM smoke prompt")
@@ -330,6 +356,14 @@ def main() -> int:
     parser.add_argument("--audit-request", help="Show in-memory audit events for a request id")
     parser.add_argument("--demo-approval-flow", action="store_true")
     parser.add_argument("--approve-demo", action="store_true")
+    parser.add_argument("--evaluate", help="Run an agent evaluation benchmark JSON file")
+    parser.add_argument(
+        "--evaluation-mode",
+        choices=[item.value for item in EvaluationMode],
+        default=EvaluationMode.SCRIPTED.value,
+    )
+    parser.add_argument("--save", help="Save evaluation report JSON")
+    parser.add_argument("--case", help="Run a single benchmark case id")
     parser.add_argument("--list-tools", action="store_true", help="List registered tools")
     parser.add_argument("--customer", help="Show synthetic customer, orders, and open tickets")
     parser.add_argument("--order", help="Show synthetic order details")
@@ -372,6 +406,15 @@ def main() -> int:
         return 0
     if args.demo_approval_flow:
         return demo_approval_flow(args.approve_demo)
+    if args.evaluate:
+        return run_evaluation_command(
+            args.evaluate,
+            args.evaluation_mode,
+            args.model,
+            args.output,
+            args.save,
+            args.case,
+        )
     if args.agent:
         return run_agent_command(
             user_input=args.agent,

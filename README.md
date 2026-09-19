@@ -4,7 +4,7 @@ A local-first AI support operations agent focused on tool calling, policy enforc
 
 ## Overview
 
-SupportOps Agent is an original portfolio and client-demo project for building an agentic support operations system from first principles. Phase 4 adds centralized policy enforcement, trusted human approvals, replay-protected action execution, and append-only audit events on top of the Phase 3 tool-using agent loop.
+SupportOps Agent is an original portfolio and client-demo project for building an agentic support operations system from first principles. Phase 5 adds deterministic system evaluation and failure-recovery benchmarking on top of the policy, approval, action, and audit runtime.
 
 The LLM proposes actions. The runtime decides whether they may execute.
 
@@ -32,6 +32,93 @@ flowchart TD
     P -. observes .- K
     P -. observes .- J
 ```
+
+Phase 5 evaluation flow:
+
+```mermaid
+flowchart TD
+    A[Benchmark Case] --> B[Fresh Agent Environment]
+    B --> C[AgentRunner]
+    C --> D[Tools / Policy / Approval / Audit]
+    D --> E[Observed Final State]
+    E --> F[Evaluator]
+    F --> G[Tool Accuracy]
+    F --> H[Policy Accuracy]
+    F --> I[Approval Safety]
+    F --> J[Action Safety]
+    F --> K[Final State]
+    F --> L[Audit Completeness]
+    F --> M[Recovery]
+    M --> N[Evaluation Report]
+```
+
+## Why Agent Evaluation Differs From Chatbot Evaluation
+
+A support operations agent is not successful because it writes convincing prose. It is successful only when the whole system behaves correctly:
+
+- selects the right tools
+- passes valid arguments
+- applies policy using trusted data
+- handles approval gates
+- avoids unauthorized execution
+- leaves the backend in the expected state
+- records audit events
+- fails safely when dependencies misbehave
+
+## Why Final State Matters More Than Fluent Text
+
+A support agent can produce a polished answer while executing the wrong action. Phase 5 evaluation therefore inspects backend state, approvals, policy results, executed tools, and audit events. Final response text is checked only with lightweight substring expectations.
+
+## Evaluation Modes
+
+`scripted` mode uses deterministic LLM decisions and is the primary correctness benchmark. It proves runtime logic, policy, approvals, execution safety, audit, and recovery without Ollama.
+
+`live` mode uses Ollama and is supplemental. It measures local model structured-output reliability and behavior, but model availability does not affect deterministic benchmark correctness.
+
+## Benchmark Scenarios
+
+`benchmarks/support_agent_eval.json` contains normal support scenarios and injected failures:
+
+- order status
+- customer order list
+- low-value refund auto-allow
+- medium refund pending approval
+- medium refund approved
+- approval denied
+- high-value refund escalation
+- outside-window denial
+- undelivered-order denial
+- invalid-reason escalation
+- support ticket creation
+- unknown order
+- malformed JSON repair
+- malformed JSON failure
+- LLM timeout
+- unknown tool recovery
+- duplicate call loop
+- max-step exhaustion
+- audit pre-write fail-closed behavior
+
+Every benchmark case starts with fresh synthetic repositories, tool registry, approval service, audit service, policy engine, action service, and agent runner.
+
+## Metrics
+
+The evaluator reports separate metrics instead of one vague score:
+
+- task success rate
+- tool selection accuracy
+- policy accuracy
+- approval accuracy
+- action safety accuracy
+- final state accuracy
+- escalation accuracy
+- audit completeness
+- failure recovery
+- structured parse success
+- average steps
+- average latency
+
+Tool selection distinguishes proposed tools from executed tools. Security-sensitive cases fail if forbidden tools execute.
 
 ## Why Prompt Instructions Are Not Authorization
 
@@ -125,6 +212,18 @@ The agent still requires JSON-only decisions. If the model returns malformed JSO
 
 Local LLM calls use `LLM_TIMEOUT_SECONDS=90` through the Ollama/OpenAI-compatible client to avoid indefinite hangs.
 
+## Failure Recovery
+
+Failure handling is deterministic and documented in `docs/failure-recovery.md`. Examples:
+
+- malformed JSON gets one repair attempt
+- LLM timeout fails safely with no write action
+- unknown tools become safe observations
+- duplicate tool loops escalate
+- max-step exhaustion escalates
+- approval denial and replay never execute
+- high-risk actions fail closed if pre-execution audit logging fails
+
 ## Synthetic Dataset
 
 All records are fictional Northstar Commerce data:
@@ -172,7 +271,17 @@ uv run python -m app.main --order ORD-1001
 uv run python -m app.main --refund-policy
 ```
 
-## Current Phase 4 Capabilities
+Evaluation commands:
+
+```bash
+uv run python -m app.main --evaluate benchmarks/support_agent_eval.json
+uv run python -m app.main --evaluate benchmarks/support_agent_eval.json --case low-value-refund
+uv run python -m app.main --evaluate benchmarks/support_agent_eval.json --output json
+uv run python -m app.main --evaluate benchmarks/support_agent_eval.json --save runtime/evaluations/support-agent.json
+uv run python -m app.main --evaluate benchmarks/support_agent_eval.json --evaluation-mode live --model llama3.2
+```
+
+## Current Phase 5 Capabilities
 
 - Centralized policy engine.
 - Trusted refund policy context.
@@ -184,6 +293,11 @@ uv run python -m app.main --refund-policy
 - JSON repair attempt for malformed model decisions.
 - LLM timeout configuration.
 - Deterministic tests for policy, approvals, action execution, audit, and bypass protection.
+- Pydantic benchmark schema.
+- Scripted and live evaluation modes.
+- Per-case result model and aggregate report.
+- Deterministic metrics for tools, policy, approvals, action safety, final state, audit, recovery, parse success, steps, and latency.
+- Failure injection for malformed output, provider failure, loops, max steps, tool errors, and audit failures.
 
 ## Known Limitations
 
@@ -199,6 +313,7 @@ uv run python -m app.main --refund-policy
 uv sync
 uv run pytest
 uv run ruff check .
+uv run python -m app.main --evaluate benchmarks/support_agent_eval.json
 uv run python -m app.main --demo-approval-flow --approve-demo
 ```
 
@@ -208,7 +323,7 @@ uv run python -m app.main --demo-approval-flow --approve-demo
 2. Synthetic support backend [x]
 3. Tool calling & agent decision loop [x]
 4. Policy enforcement, approvals & audit trail [x]
-5. Agent evaluation & failure recovery
+5. Agent evaluation & failure recovery [x]
 6. FastAPI backend
 7. Gradio operations console
 8. Observability, deployment & portfolio release

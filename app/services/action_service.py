@@ -52,43 +52,58 @@ class ActionService:
         except ValidationError as exc:
             raise ActionExecutionError(f"Approved action arguments are invalid: {exc}") from exc
 
-        self.audit_service.record(
-            request_id=request_id,
-            event_type=AuditEventType.TOOL_STARTED,
-            actor="action_service",
-            tool_name=action.tool_name,
-            details={"policy_decision": policy_decision.decision.value},
-            success=None,
-        )
+        try:
+            self.audit_service.record(
+                request_id=request_id,
+                event_type=AuditEventType.TOOL_STARTED,
+                actor="action_service",
+                tool_name=action.tool_name,
+                details={"policy_decision": policy_decision.decision.value},
+                success=None,
+            )
+        except Exception as exc:
+            raise ActionExecutionError(
+                "Critical pre-execution audit logging failed; action was not executed"
+            ) from exc
         result = tool.execute(validated)
-        self.audit_service.record(
-            request_id=request_id,
-            event_type=(
-                AuditEventType.TOOL_COMPLETED if result.success else AuditEventType.TOOL_FAILED
-            ),
-            actor="action_service",
-            tool_name=action.tool_name,
-            details={
-                "success": result.success,
-                "error": result.error,
-            },
-            success=result.success,
-        )
+        try:
+            self.audit_service.record(
+                request_id=request_id,
+                event_type=(
+                    AuditEventType.TOOL_COMPLETED if result.success else AuditEventType.TOOL_FAILED
+                ),
+                actor="action_service",
+                tool_name=action.tool_name,
+                details={
+                    "success": result.success,
+                    "error": result.error,
+                },
+                success=result.success,
+            )
+        except Exception as exc:
+            raise ActionExecutionError(
+                "Post-execution audit logging failed after tool execution"
+            ) from exc
         if not result.success:
             raise ActionExecutionError(result.error or "Tool execution failed")
 
         action_id = uuid4()
-        self.audit_service.record(
-            request_id=request_id,
-            event_type=AuditEventType.ACTION_EXECUTED,
-            actor="action_service",
-            tool_name=action.tool_name,
-            details={
-                "action_id": str(action_id),
-                "policy_decision": policy_decision.decision.value,
-            },
-            success=True,
-        )
+        try:
+            self.audit_service.record(
+                request_id=request_id,
+                event_type=AuditEventType.ACTION_EXECUTED,
+                actor="action_service",
+                tool_name=action.tool_name,
+                details={
+                    "action_id": str(action_id),
+                    "policy_decision": policy_decision.decision.value,
+                },
+                success=True,
+            )
+        except Exception as exc:
+            raise ActionExecutionError(
+                "Post-execution action audit logging failed after tool execution"
+            ) from exc
         if approval is not None:
             self.approval_service.consume(approval.approval_id, action_id)
             self.audit_service.record(
