@@ -1,4 +1,4 @@
-from openai import APIConnectionError, NotFoundError, OpenAI
+from openai import APIConnectionError, APITimeoutError, NotFoundError, OpenAI
 
 from app.core.config import Settings
 from app.llm.base import (
@@ -18,7 +18,11 @@ class OllamaProvider(LLMProvider):
 
     def __init__(self, settings: Settings, client: OpenAI | None = None) -> None:
         self.settings = settings
-        self.client = client or OpenAI(base_url=settings.ollama_base_url, api_key="ollama")
+        self.client = client or OpenAI(
+            base_url=settings.ollama_base_url,
+            api_key="ollama",
+            timeout=settings.llm_timeout_seconds,
+        )
 
     def generate(self, messages: list[ChatMessage], model: str | None = None) -> ChatResponse:
         selected_model = model or self.settings.default_model
@@ -31,6 +35,8 @@ class OllamaProvider(LLMProvider):
                 messages=[message.as_openai_message() for message in messages],
                 **request_kwargs,
             )
+        except APITimeoutError as exc:
+            raise LLMUnavailableError("Ollama request timed out") from exc
         except APIConnectionError as exc:
             raise LLMUnavailableError("Ollama is unavailable or refused the connection") from exc
         except NotFoundError as exc:

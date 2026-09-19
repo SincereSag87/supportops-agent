@@ -4,150 +4,164 @@ A local-first AI support operations agent focused on tool calling, policy enforc
 
 ## Overview
 
-SupportOps Agent is an original portfolio and client-demo project for building an agentic support operations system from first principles. Phase 1 created the core agent and tool contracts. Phase 2 added a deterministic synthetic Northstar Commerce backend. Phase 3 adds the first complete tool-using agent decision loop.
+SupportOps Agent is an original portfolio and client-demo project for building an agentic support operations system from first principles. Phase 4 adds centralized policy enforcement, trusted human approvals, replay-protected action execution, and append-only audit events on top of the Phase 3 tool-using agent loop.
 
-The agent can now ask an LLM for one structured decision at a time, validate requested tools, apply runtime safety rules, execute allowed tools, observe results, and continue until completion, escalation, approval required, failure, or max steps.
+The LLM proposes actions. The runtime decides whether they may execute.
 
 ## Architecture
-
-Phase 3 decision loop:
 
 ```mermaid
 flowchart TD
     A[User] --> B[AgentRunner]
-    B --> C[LLM]
-    C --> D[AgentDecision]
-    D --> E[Tool Validation]
-    E --> F[Safety Controller]
-    F --> G[READ_ONLY Execute]
-    F --> H[LOW_RISK_WRITE Execute if enabled]
-    F --> I[HIGH_RISK_WRITE Await Approval]
-    G --> J[ToolResult]
-    H --> J
-    I --> K[ProposedAction]
-    J --> L[Agent State]
-    L --> M[Next Step / Final]
+    B --> C[LLM Decision]
+    C --> D[ProposedAction]
+    D --> E[PolicyEngine]
+    E --> F[ALLOW]
+    E --> G[REQUIRE_APPROVAL]
+    E --> H[DENY]
+    E --> I[ESCALATE]
+    F --> J[ActionService]
+    G --> K[ApprovalService / Human]
+    K --> J
+    H --> L[Stop]
+    I --> M[Human Escalation]
+    J --> N[ToolRegistry]
+    N --> O[Support Backend]
+    P[AuditService] -. observes .- B
+    P -. observes .- E
+    P -. observes .- K
+    P -. observes .- J
 ```
 
-Synthetic backend flow:
+## Why Prompt Instructions Are Not Authorization
 
-```mermaid
-flowchart TD
-    A[CLI / AgentRunner] --> B[Tool Registry]
-    B --> C[Support Tools]
-    C --> D[SupportService]
-    D --> E[Repositories]
-    E --> F[Synthetic In-Memory Data]
-```
+Prompt instructions are useful guidance, but they are not a security boundary. Authorization comes from trusted application code:
 
-## Why The LLM Does Not Directly Execute Tools
+- trusted support data loaded by repositories
+- deterministic policy rules
+- explicit approval records created by `ApprovalService`
+- replay checks on consumed approvals
+- audited execution through `ActionService`
 
-The model only proposes a structured `AgentDecision`. The runtime is the execution boundary:
+The model cannot approve its own action, forge approval, skip audit logging, alter policy thresholds, or execute high-risk tools directly.
 
-- validates the tool exists
-- validates arguments with the tool input model
-- checks tool risk level
-- decides whether execution is allowed
-- blocks high-risk writes from automatic execution
+## Policy Engine
 
-Prompt instructions are not a security boundary. Runtime safety enforcement is the security boundary. Even if the LLM requests `issue_refund`, the Phase 3 runtime refuses automatic execution and returns an approval-required result.
+`PolicyEngine` evaluates `ProposedAction` objects against a trusted `PolicyContext`. The context uses application data, not model assertions:
 
-## Agent Decision Schema
+- customer id
+- trusted order record
+- stored refund policy
+- current time
+- previous refund totals
+- tool risk level
 
-The LLM must return JSON only. Supported decisions:
+Refund rules are explicit:
 
-- `tool_call`
-- `final_response`
-- `escalate`
-- `fail`
+- order must exist
+- order must belong to the customer when customer context exists
+- order must be delivered
+- delivery must be inside the 30-day return window
+- refund reason must be allowed
+- refund amount must be greater than zero
+- refund amount must not exceed remaining refundable amount
 
-Each decision includes a short `reasoning_summary`. This is an externally safe rationale, not private step-by-step reasoning or hidden chain-of-thought.
+Refund amount outcomes:
 
-Example:
-
-```json
-{
-  "decision_type": "tool_call",
-  "reasoning_summary": "The order must be retrieved before answering the status question.",
-  "tool_name": "order_lookup",
-  "tool_arguments": {
-    "order_id": "ORD-1001"
-  }
-}
-```
-
-## Runtime Safety Gate
-
-Tool risk behavior:
-
-| Risk | Phase 3 Behavior |
+| Amount | Decision |
 | --- | --- |
-| `READ_ONLY` | Executes automatically |
-| `LOW_RISK_WRITE` | Executes only when `AGENT_ALLOW_LOW_RISK_WRITES=true` |
-| `HIGH_RISK_WRITE` | Never auto-executes; creates `ProposedAction` and awaits approval |
+| `<= 100.00` | `ALLOW` |
+| `> 100.00` and `<= 500.00` | `REQUIRE_APPROVAL` |
+| `> 500.00` | `ESCALATE` |
 
-High-risk tools currently include `issue_refund` and `reverse_refund`.
+Invalid reasons escalate for human review. Undelivered or outside-window orders are denied.
 
-## Agent Loop Controls
+## Approval Workflow
 
-- `AGENT_MAX_STEPS=8` prevents infinite loops.
-- `AGENT_MAX_CONTEXT_CHARS=16000` bounds prompt context.
-- `AGENT_MAX_IDENTICAL_TOOL_CALLS=2` catches repeated identical tool loops.
-- Tool failures become safe observations instead of crashing the runner.
-- Malformed model decisions fail safely with a structured error.
+`ApprovalService` owns trusted approval decisions. Approval requests store the proposed action, policy decision, status, request id, and consumption metadata.
 
-## Safe Execution Traces
+Approvals are replay-protected:
 
-The CLI can show a decision trace with `--show-trace`. It includes step number, decision type, safe reasoning summary, tool name, and result status. It does not print private chain-of-thought.
+- denied approvals cannot execute
+- nonexistent approvals cannot execute
+- approvals for different actions cannot execute
+- consumed approvals cannot execute again
+- approval decisions are application-side records, not model-generated booleans
 
-## Synthetic Support Backend
+## ActionService
 
-The backend remains fictional and deterministic:
+`ActionService` is the only Phase 4 path for executing policy-controlled high-risk actions. It verifies policy, approval requirements, tool arguments, and audit logging before and after execution.
 
-- Jordan Lee, `CUS-1001`, `jordan.lee@example.test`
-- `ORD-1001`, Wireless Headphones, `79.99 USD`, delivered on `2026-09-12`
-- Morgan Chen, `CUS-1002`, `ORD-1002`, Laptop Docking Station, `299.99 USD`
-- A high-value `749.99 USD` order for escalation scenarios
-- An older delivered order outside the return-window scenario
-- A shipped but not delivered order
-- A multi-item order for future partial refund logic
+Auto-execution is intentionally narrow. `issue_refund` may auto-execute only when policy returns `ALLOW`. `reverse_refund` always requires approval.
 
-All normal CLI runs start from seeded in-memory state.
+## Audit Trail
 
-## Support Tools
+`AuditService` appends events through an in-memory repository. Normal APIs do not delete or mutate historical events.
 
-| Tool | Risk | Purpose |
-| --- | --- | --- |
-| `customer_lookup` | READ_ONLY | Fetch synthetic customer by ID |
-| `customer_lookup_by_email` | READ_ONLY | Fetch synthetic customer by email |
-| `order_lookup` | READ_ONLY | Fetch synthetic order details |
-| `list_customer_orders` | READ_ONLY | List orders for a customer |
-| `refund_policy_lookup` | READ_ONLY | View refund policy |
-| `ticket_lookup` | READ_ONLY | Fetch a support ticket |
-| `create_ticket` | LOW_RISK_WRITE | Create a synthetic support ticket |
-| `update_ticket_status` | LOW_RISK_WRITE | Update synthetic ticket status |
-| `issue_refund` | HIGH_RISK_WRITE | Propose a controlled synthetic refund |
-| `reverse_refund` | HIGH_RISK_WRITE | Propose a synthetic refund reversal |
+Events include:
+
+- request received
+- model called
+- tool selected
+- policy checked
+- approval requested
+- approval granted or denied
+- tool started
+- tool completed or failed
+- action executed
+- approval consumed
+- escalation
+- request completion or failure
+
+Audit details contain safe structured metadata such as ids, statuses, decisions, amounts, tool names, and policy outcomes. They do not store hidden chain-of-thought.
+
+## Reversal Policy
+
+Refund reversal uses `reverse_refund`, preserves original refund records, creates a reversal record, restores totals, and is always approval-required in Phase 4.
+
+## Structured Output Hardening
+
+The agent still requires JSON-only decisions. If the model returns malformed JSON, the runner makes at most one repair attempt using `AGENT_DECISION_REPAIR_ATTEMPTS=1`. If repair fails, the request fails safely.
+
+Local LLM calls use `LLM_TIMEOUT_SECONDS=90` through the Ollama/OpenAI-compatible client to avoid indefinite hangs.
+
+## Synthetic Dataset
+
+All records are fictional Northstar Commerce data:
+
+- `CUS-1001` Jordan Lee, `ORD-1001`, Wireless Headphones, `79.99 USD`
+- `CUS-1002` Morgan Chen, `ORD-1002`, Laptop Docking Station, `299.99 USD`
+- `ORD-1003`, high-value `749.99 USD` escalation case
+- older delivered order outside the return window
+- shipped but undelivered order
+
+Emails use `example.test`.
 
 ## CLI
 
 Run the agent:
 
 ```bash
-uv run python -m app.main --agent "What is the status of my order ORD-1001?" --customer-id CUS-1001 --show-trace
+uv run python -m app.main --agent "My headphones arrived damaged. Can I get a refund?" --customer-id CUS-1001 --show-trace
 ```
 
-Run with model override:
+Approval commands:
 
 ```bash
-uv run python -m app.main --agent "My headphones arrived damaged. Can I get a refund?" --customer-id CUS-1001 --model gemma3 --show-trace
+uv run python -m app.main --pending-approvals
+uv run python -m app.main --approve <approval-id> --actor "demo-manager"
+uv run python -m app.main --deny <approval-id> --actor "demo-manager" --comment "Not approved."
+uv run python -m app.main --audit-request <request-id>
 ```
 
-JSON output:
+Because normal storage is in-memory and resets per CLI process, Phase 4 includes a single-process demo flow:
 
 ```bash
-uv run python -m app.main --agent "What is the status of my order ORD-1001?" --customer-id CUS-1001 --output json
+uv run python -m app.main --demo-approval-flow
+uv run python -m app.main --demo-approval-flow --approve-demo
 ```
+
+The demo creates a medium-value approval request and, with `--approve-demo`, executes it once and proves replay is blocked.
 
 Support backend commands:
 
@@ -158,44 +172,26 @@ uv run python -m app.main --order ORD-1001
 uv run python -m app.main --refund-policy
 ```
 
-Manual controlled tool execution still requires `--confirm-write` for write tools.
+## Current Phase 4 Capabilities
 
-## Current Phase 3 Capabilities
-
-- Structured `AgentDecision` model.
-- JSON-only parser with fenced JSON support and clean parse errors.
-- Prompt builder with tool schemas and runtime safety instructions.
-- Bounded context builder preserving the original request and recent observations.
-- AgentRunner with tool validation, safety checks, observations, max-step guard, and duplicate-call protection.
-- AgentService for high-level request handling.
-- CLI support for agent runs, JSON output, and safe execution traces.
-- Tests proving high-risk refund tools cannot execute automatically.
+- Centralized policy engine.
+- Trusted refund policy context.
+- Approval repository and service.
+- Approval replay protection.
+- Centralized action execution service.
+- Append-only in-memory audit trail.
+- AgentRunner integration for allow, approval, deny, and escalation outcomes.
+- JSON repair attempt for malformed model decisions.
+- LLM timeout configuration.
+- Deterministic tests for policy, approvals, action execution, audit, and bypass protection.
 
 ## Known Limitations
 
-- No centralized policy engine yet.
-- No human approval execution workflow yet.
-- No persistent audit log yet.
+- In-memory state resets between ordinary CLI processes.
+- No external database yet.
 - No FastAPI or Gradio UI yet.
-- LLM output quality depends on the local model, but malformed output is handled safely.
-
-## Technology Stack
-
-Runtime:
-
-- Python 3.12+
-- uv
-- Ollama
-- OpenAI-compatible Ollama endpoint
-- OpenAI Python SDK
-- Pydantic
-- pydantic-settings
-- python-dotenv
-
-Development:
-
-- pytest
-- Ruff
+- No production authentication or authorization layer yet.
+- Live local model structured-output quality may vary.
 
 ## Quick Start
 
@@ -203,15 +199,15 @@ Development:
 uv sync
 uv run pytest
 uv run ruff check .
-uv run python -m app.main --agent "What is the status of my order ORD-1001?" --customer-id CUS-1001 --show-trace
+uv run python -m app.main --demo-approval-flow --approve-demo
 ```
 
-## Planned Roadmap
+## Roadmap
 
 1. Agent foundation & tool contracts [x]
 2. Synthetic support backend [x]
 3. Tool calling & agent decision loop [x]
-4. Policy enforcement, approvals & audit trail
+4. Policy enforcement, approvals & audit trail [x]
 5. Agent evaluation & failure recovery
 6. FastAPI backend
 7. Gradio operations console
@@ -219,6 +215,6 @@ uv run python -m app.main --agent "What is the status of my order ORD-1001?" --c
 
 ## Security / Privacy
 
-All records are synthetic. The project uses `example.test` email addresses only. Refund behavior is simulated in memory. No card data, payment processor integration, database, external support API, authentication secret, or real customer data is used.
+All records are synthetic. No real customer data, payment card data, authentication secrets, payment processor integration, external support API, or production database is used.
 
-Do not commit `.env`, `.venv/`, logs, model caches, runtime audit data, secrets, or unrelated files.
+Do not commit `.env`, `.venv/`, logs, model caches, runtime approval/audit state, secrets, or unrelated files.

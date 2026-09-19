@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
@@ -17,6 +18,9 @@ class AuditEventType(StrEnum):
     APPROVAL_GRANTED = "approval_granted"
     APPROVAL_DENIED = "approval_denied"
     ACTION_EXECUTED = "action_executed"
+    ACTION_BLOCKED = "action_blocked"
+    APPROVAL_CONSUMED = "approval_consumed"
+    ACTION_REVERSED = "action_reversed"
     ESCALATED = "escalated"
     REQUEST_COMPLETED = "request_completed"
     REQUEST_FAILED = "request_failed"
@@ -29,5 +33,5 @@ class AuditEvent(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     actor: str
     tool_name: str | None = None
-    details: dict[str, str | int | bool] = Field(default_factory=dict)
+    details: dict[str, Any] = Field(default_factory=dict)
     success: bool | None = None

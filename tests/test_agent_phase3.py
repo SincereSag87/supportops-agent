@@ -320,6 +320,31 @@ def test_runner_escalate_fail_max_steps_model_failure_and_malformed() -> None:
     assert model_error_runner.run(AgentRequest(user_input="Help")).status == AgentStatus.FAILED
 
 
+def test_runner_repairs_one_malformed_decision() -> None:
+    repaired_runner, _, _ = make_runner(
+        [
+            "not json",
+            decision_json(
+                decision_type="final_response",
+                reasoning_summary="Repaired response.",
+                final_response="Recovered safely.",
+            ),
+        ],
+        settings=Settings(AGENT_DECISION_REPAIR_ATTEMPTS=1, _env_file=None),
+    )
+    failed_runner, _, _ = make_runner(
+        ["not json", "still not json"],
+        settings=Settings(AGENT_DECISION_REPAIR_ATTEMPTS=1, _env_file=None),
+    )
+
+    repaired = repaired_runner.run(AgentRequest(user_input="Help"))
+    failed = failed_runner.run(AgentRequest(user_input="Help"))
+
+    assert repaired.status == AgentStatus.COMPLETED
+    assert repaired.response == "Recovered safely."
+    assert failed.status == AgentStatus.FAILED
+
+
 def test_runner_tool_failure_unknown_invalid_and_duplicate_guard() -> None:
     unknown_runner, _, _ = make_runner(
         [

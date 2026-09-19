@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     agent_allow_low_risk_writes: bool = Field(
         default=True, alias="AGENT_ALLOW_LOW_RISK_WRITES"
     )
+    agent_decision_repair_attempts: int = Field(default=1, alias="AGENT_DECISION_REPAIR_ATTEMPTS")
+    llm_timeout_seconds: float = Field(default=90, alias="LLM_TIMEOUT_SECONDS")
     auto_action_limit: Decimal = Field(default=Decimal("100.00"), alias="AUTO_ACTION_LIMIT")
     approval_action_limit: Decimal = Field(
         default=Decimal("500.00"), alias="APPROVAL_ACTION_LIMIT"
@@ -36,6 +38,20 @@ class Settings(BaseSettings):
     def validate_positive_agent_limits(cls, value: int) -> int:
         if value <= 0:
             raise ValueError("agent limits must be greater than 0")
+        return value
+
+    @field_validator("agent_decision_repair_attempts")
+    @classmethod
+    def validate_non_negative_repair_attempts(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("AGENT_DECISION_REPAIR_ATTEMPTS must be greater than or equal to 0")
+        return value
+
+    @field_validator("llm_timeout_seconds")
+    @classmethod
+    def validate_llm_timeout(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("LLM_TIMEOUT_SECONDS must be greater than 0")
         return value
 
     @field_validator("auto_action_limit", "approval_action_limit")

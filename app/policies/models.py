@@ -32,7 +32,8 @@ class PolicyDecisionResult(BaseModel):
     reason: str
     policy_name: str
     action: ProposedAction
-    metadata: dict[str, str | int | bool] = Field(default_factory=dict)
+    rule_results: list[dict[str, Any]] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ApprovalStatus(StrEnum):
@@ -51,6 +52,9 @@ class ApprovalRequest(BaseModel):
     reason: str
     requested_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     status: ApprovalStatus = ApprovalStatus.PENDING
+    policy_decision: PolicyDecisionResult | None = None
+    consumed_at: datetime | None = None
+    executed_action_id: UUID | None = None
 
 
 class ApprovalDecision(BaseModel):

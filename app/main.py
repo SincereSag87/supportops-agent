@@ -1,14 +1,22 @@
 import argparse
 import json
 from pathlib import Path
+from uuid import UUID
 
 from app.agent.runner import AgentRunner
 from app.agent.safety import AgentSafetyController
+from app.approvals.repository import InMemoryApprovalRepository
+from app.approvals.service import ApprovalService
+from app.audit.repository import InMemoryAuditRepository
+from app.audit.service import AuditService
 from app.core.config import get_settings
 from app.domain.tickets import TicketStatus
 from app.llm.base import LLMProviderError
 from app.llm.models import ChatMessage, ChatRole
 from app.llm.ollama_provider import OllamaProvider
+from app.policies.engine import PolicyEngine
+from app.policies.models import ProposedAction
+from app.services.action_service import ActionService
 from app.services.agent_service import AgentService
 from app.services.health_service import HealthService
 from app.support.service import create_demo_support_service
@@ -159,13 +167,25 @@ def build_agent_service() -> AgentService:
     settings = get_settings()
     support_service = create_demo_support_service()
     registry = create_support_tool_registry(support_service)
+    approval_service = ApprovalService(InMemoryApprovalRepository())
+    audit_service = AuditService(InMemoryAuditRepository())
+    action_service = ActionService(registry, approval_service, audit_service)
+    policy_engine = PolicyEngine(support_service)
     runner = AgentRunner(
         llm_provider=OllamaProvider(settings),
         tool_registry=registry,
         safety_controller=AgentSafetyController(settings),
         settings=settings,
+        policy_engine=policy_engine,
+        action_service=action_service,
+        audit_service=audit_service,
     )
-    return AgentService(runner)
+    return AgentService(
+        runner,
+        approval_service=approval_service,
+        action_service=action_service,
+        audit_service=audit_service,
+    )
 
 
 def run_agent_command(
@@ -211,6 +231,89 @@ def run_agent_command(
     return 0 if result.error is None else 1
 
 
+def print_pending_approvals() -> int:
+    service = build_agent_service()
+    approvals = service.approval_service.list_pending() if service.approval_service else []
+    print("Approval ID\tRequest ID\tTool\tAmount\tReason\tStatus")
+    for approval in approvals:
+        print(
+            f"{approval.approval_id}\t{approval.request_id}\t{approval.action.tool_name}\t"
+            f"{approval.action.arguments.get('amount', '')}\t{approval.reason}\t"
+            f"{approval.status.value}"
+        )
+    return 0
+
+
+def resolve_approval_command(
+    approval_id: str,
+    approved: bool,
+    actor: str,
+    comment: str | None,
+) -> int:
+    try:
+        result = build_agent_service().resolve_approval(
+            UUID(approval_id),
+            approved=approved,
+            decided_by=actor,
+            comment=comment,
+        )
+    except Exception as exc:
+        print(f"Approval resolution failed: {exc}")
+        return 1
+    print(result.model_dump_json(indent=2))
+    return 0 if result.error is None else 1
+
+
+def demo_approval_flow(approve_demo: bool) -> int:
+    support_service = create_demo_support_service()
+    registry = create_support_tool_registry(support_service)
+    approval_service = ApprovalService(InMemoryApprovalRepository())
+    audit_service = AuditService(InMemoryAuditRepository())
+    action_service = ActionService(registry, approval_service, audit_service)
+    policy_engine = PolicyEngine(support_service)
+    request_id = UUID("00000000-0000-4000-8000-000000000004")
+    action = ProposedAction(
+        action_type="issue_refund",
+        tool_name="issue_refund",
+        arguments={
+            "order_id": "ORD-1002",
+            "amount": "299.99",
+            "reason": "defective",
+            "idempotency_key": "phase4-demo-approval",
+        },
+        risk_level=ToolRiskLevel.HIGH_RISK_WRITE,
+        reversible=True,
+        rollback_tool="reverse_refund",
+        estimated_value=support_service.get_order("ORD-1002").total,
+    )
+    context = policy_engine.build_context(action, customer_id="CUS-1002")
+    policy_result = policy_engine.evaluate(action, context)
+    approval = approval_service.create_request(
+        request_id=request_id,
+        action=action,
+        reason=policy_result.reason,
+        policy_decision=policy_result,
+    )
+    print(f"Policy Decision: {policy_result.decision.value}")
+    print(f"Approval ID: {approval.approval_id}")
+    print(f"Order refund total before: {support_service.get_order('ORD-1002').refund_total}")
+    if not approve_demo:
+        print("Pending approval created. Re-run with --approve-demo to execute in this process.")
+        return 0
+    approval_service.approve(approval.approval_id, "demo-manager", "Approved demo refund.")
+    result = action_service.execute(request_id, action, policy_result, approval.approval_id)
+    print(f"Execution success: {result.success}")
+    print(f"Order refund total after: {support_service.get_order('ORD-1002').refund_total}")
+    try:
+        action_service.execute(request_id, action, policy_result, approval.approval_id)
+    except Exception as exc:
+        print(f"Replay blocked: {exc}")
+    print("Audit Events:")
+    for event in audit_service.list_for_request(request_id):
+        print(f"{event.event_type.value}\t{event.actor}\t{event.tool_name or ''}\t{event.success}")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="SupportOps Agent CLI")
     parser.add_argument("--llm-test", action="store_true", help="Run a safe LLM smoke prompt")
@@ -219,6 +322,14 @@ def main() -> int:
     parser.add_argument("--customer-id", help="Synthetic customer id for --agent")
     parser.add_argument("--output", choices=["text", "json"], default="text")
     parser.add_argument("--show-trace", action="store_true", help="Show safe execution trace")
+    parser.add_argument("--pending-approvals", action="store_true")
+    parser.add_argument("--approve", help="Approve an in-memory approval id")
+    parser.add_argument("--deny", help="Deny an in-memory approval id")
+    parser.add_argument("--actor", default="demo-manager")
+    parser.add_argument("--comment")
+    parser.add_argument("--audit-request", help="Show in-memory audit events for a request id")
+    parser.add_argument("--demo-approval-flow", action="store_true")
+    parser.add_argument("--approve-demo", action="store_true")
     parser.add_argument("--list-tools", action="store_true", help="List registered tools")
     parser.add_argument("--customer", help="Show synthetic customer, orders, and open tickets")
     parser.add_argument("--order", help="Show synthetic order details")
@@ -243,6 +354,24 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    if args.pending_approvals:
+        return print_pending_approvals()
+    if args.approve:
+        return resolve_approval_command(args.approve, True, args.actor, args.comment)
+    if args.deny:
+        return resolve_approval_command(args.deny, False, args.actor, args.comment)
+    if args.audit_request:
+        service = build_agent_service()
+        events = (
+            service.audit_service.list_for_request(UUID(args.audit_request))
+            if service.audit_service
+            else []
+        )
+        for event in events:
+            print(f"{event.timestamp.isoformat()}\t{event.event_type.value}\t{event.actor}")
+        return 0
+    if args.demo_approval_flow:
+        return demo_approval_flow(args.approve_demo)
     if args.agent:
         return run_agent_command(
             user_input=args.agent,
