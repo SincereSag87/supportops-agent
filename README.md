@@ -4,7 +4,7 @@ A local-first AI support operations agent focused on tool calling, policy enforc
 
 ## Overview
 
-SupportOps Agent is an original portfolio and client-demo project for building an agentic support operations system from first principles. Phase 5 adds deterministic system evaluation and failure-recovery benchmarking on top of the policy, approval, action, and audit runtime.
+SupportOps Agent is an original portfolio and client-demo project for building an agentic support operations system from first principles. Phase 6 exposes the system through a production-style FastAPI backend while preserving the policy, approval, action, audit, and evaluation boundaries.
 
 The LLM proposes actions. The runtime decides whether they may execute.
 
@@ -51,6 +51,111 @@ flowchart TD
     F --> M[Recovery]
     M --> N[Evaluation Report]
 ```
+
+Phase 6 API architecture:
+
+```mermaid
+flowchart TD
+    A[Client] -->|HTTP| B[FastAPI]
+    B --> C[SupportService]
+    B --> D[AgentService]
+    D --> E[AgentRunner]
+    E --> F[PolicyEngine]
+    F --> G[ApprovalService]
+    G --> H[ActionService]
+    B --> I[AuditService]
+    B --> J[EvaluationService]
+    H --> K[Synthetic Backend]
+    C --> K
+    J --> K
+```
+
+## FastAPI Backend
+
+Run the API:
+
+```bash
+uv run uvicorn app.api.app:app --host 127.0.0.1 --port 8000
+```
+
+Swagger UI:
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+The API uses an application-scoped service container, so synthetic support state, pending approvals, and audit events survive across HTTP requests for the lifetime of the server. `POST /demo/reset` rebuilds that state for repeatable demos.
+
+Live Ollama calls are currently blocking local calls. A live model request may occupy a worker until inference completes or times out.
+
+## Why There Is No Direct Refund Endpoint
+
+The API is only a transport layer. Sensitive actions remain behind:
+
+Agent proposal -> PolicyEngine -> Approval if required -> ActionService -> Tool
+
+There is no `POST /refund` route. Routes do not bypass policy decisions, approval verification, approval replay protection, or audit requirements.
+
+## API Endpoints
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /health` | Basic API status |
+| `GET /health/ollama` | Local Ollama reachability and configured model |
+| `GET /health/state` | Safe synthetic state counts |
+| `GET /customers` | Synthetic customer summaries |
+| `GET /customers/{customer_id}` | Customer detail with order/ticket ids |
+| `GET /orders/{order_id}` | Order detail and refundable amount |
+| `GET /customers/{customer_id}/orders` | Customer orders |
+| `GET /tickets/{ticket_id}` | Ticket detail |
+| `GET /customers/{customer_id}/tickets` | Customer tickets |
+| `GET /policies/refund` | Current synthetic refund policy |
+| `POST /agent/requests` | Live agent request through Ollama |
+| `GET /approvals/pending` | Pending approval list |
+| `POST /approvals/{approval_id}/approve` | Trusted approval and execution |
+| `POST /approvals/{approval_id}/deny` | Trusted denial |
+| `GET /audit/requests/{request_id}` | Chronological request audit |
+| `GET /audit/recent` | Recent audit events |
+| `GET /evaluation/benchmarks` | Registered benchmark metadata |
+| `POST /evaluation/run` | Run scripted or live benchmark |
+| `POST /demo/scenarios/{scenario_id}` | Deterministic scripted API scenario |
+| `POST /demo/reset` | Demo-only state reset |
+
+## Scripted Demo API
+
+Scripted demo scenarios are deterministic and do not pretend to be live model inference. Supported IDs:
+
+- `order-status`
+- `low-refund`
+- `medium-refund`
+- `high-refund`
+- `old-order`
+- `ticket-create`
+
+## API Error Handling
+
+Errors use a consistent shape:
+
+```json
+{
+  "error": {
+    "code": "MODEL_NOT_AVAILABLE",
+    "message": "The requested local model is not available."
+  }
+}
+```
+
+Domain not-found errors map to `404`, approval conflicts to `409`, unavailable local models to `503`, and malformed agent decisions to `502`. Stack traces are not returned.
+
+## CORS
+
+The API prepares for the Phase 7 Gradio console with:
+
+```text
+CORS_ORIGINS=http://localhost:7860,http://127.0.0.1:7860
+```
+
+It does not default to `*`.
 
 ## Why Agent Evaluation Differs From Chatbot Evaluation
 
@@ -281,6 +386,43 @@ uv run python -m app.main --evaluate benchmarks/support_agent_eval.json --save r
 uv run python -m app.main --evaluate benchmarks/support_agent_eval.json --evaluation-mode live --model llama3.2
 ```
 
+PowerShell API examples:
+
+```powershell
+$body = @{
+    user_input = "What is the status of my order ORD-1001?"
+    customer_id = "CUS-1001"
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+    -Uri "http://127.0.0.1:8000/agent/requests" `
+    -Method Post `
+    -ContentType "application/json" `
+    -Body $body
+```
+
+Medium refund approval demo:
+
+```powershell
+Invoke-RestMethod `
+    -Uri "http://127.0.0.1:8000/demo/reset" `
+    -Method Post `
+    -ContentType "application/json" `
+    -Body (@{ confirm = $true } | ConvertTo-Json)
+
+$pending = Invoke-RestMethod `
+    -Uri "http://127.0.0.1:8000/demo/scenarios/medium-refund" `
+    -Method Post
+
+$approvalId = $pending.approvals_required[0].approval_id
+
+Invoke-RestMethod `
+    -Uri "http://127.0.0.1:8000/approvals/$approvalId/approve" `
+    -Method Post `
+    -ContentType "application/json" `
+    -Body (@{ actor = "demo-manager"; comment = "Approved for demo." } | ConvertTo-Json)
+```
+
 ## Current Phase 5 Capabilities
 
 - Centralized policy engine.
@@ -298,14 +440,19 @@ uv run python -m app.main --evaluate benchmarks/support_agent_eval.json --evalua
 - Per-case result model and aggregate report.
 - Deterministic metrics for tools, policy, approvals, action safety, final state, audit, recovery, parse success, steps, and latency.
 - Failure injection for malformed output, provider failure, loops, max steps, tool errors, and audit failures.
+- FastAPI application factory and app-scoped service container.
+- HTTP endpoints for health, synthetic support data, agent requests, approvals, audit, evaluation, and scripted demos.
+- Demo-only state reset for repeatable client testing.
 
 ## Known Limitations
 
 - In-memory state resets between ordinary CLI processes.
 - No external database yet.
-- No FastAPI or Gradio UI yet.
+- No Gradio operations console yet.
 - No production authentication or authorization layer yet.
 - Live local model structured-output quality may vary.
+- API state is in-memory and resets when the server restarts.
+- API authentication is intentionally deferred.
 
 ## Quick Start
 
@@ -314,6 +461,7 @@ uv sync
 uv run pytest
 uv run ruff check .
 uv run python -m app.main --evaluate benchmarks/support_agent_eval.json
+uv run uvicorn app.api.app:app --host 127.0.0.1 --port 8000
 uv run python -m app.main --demo-approval-flow --approve-demo
 ```
 
@@ -324,7 +472,7 @@ uv run python -m app.main --demo-approval-flow --approve-demo
 3. Tool calling & agent decision loop [x]
 4. Policy enforcement, approvals & audit trail [x]
 5. Agent evaluation & failure recovery [x]
-6. FastAPI backend
+6. FastAPI backend [x]
 7. Gradio operations console
 8. Observability, deployment & portfolio release
 

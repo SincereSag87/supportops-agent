@@ -21,6 +21,12 @@ class Settings(BaseSettings):
     )
     agent_decision_repair_attempts: int = Field(default=1, alias="AGENT_DECISION_REPAIR_ATTEMPTS")
     llm_timeout_seconds: float = Field(default=90, alias="LLM_TIMEOUT_SECONDS")
+    api_host: str = Field(default="127.0.0.1", alias="API_HOST")
+    api_port: int = Field(default=8000, alias="API_PORT")
+    cors_origins: str = Field(
+        default="http://localhost:7860,http://127.0.0.1:7860",
+        alias="CORS_ORIGINS",
+    )
     auto_action_limit: Decimal = Field(default=Decimal("100.00"), alias="AUTO_ACTION_LIMIT")
     approval_action_limit: Decimal = Field(
         default=Decimal("500.00"), alias="APPROVAL_ACTION_LIMIT"
@@ -53,6 +59,17 @@ class Settings(BaseSettings):
         if value <= 0:
             raise ValueError("LLM_TIMEOUT_SECONDS must be greater than 0")
         return value
+
+    @field_validator("api_port")
+    @classmethod
+    def validate_api_port(cls, value: int) -> int:
+        if value <= 0 or value > 65535:
+            raise ValueError("API_PORT must be a valid TCP port")
+        return value
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
     @field_validator("auto_action_limit", "approval_action_limit")
     @classmethod

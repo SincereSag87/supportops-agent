@@ -5,14 +5,17 @@ description = "Local-first AI support operations agent foundation."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "fastapi>=0.141.1",
     "openai>=1.100.0",
     "pydantic>=2.11.0",
     "pydantic-settings>=2.10.0",
     "python-dotenv>=1.1.0",
+    "uvicorn>=0.53.0",
 ]
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28.1",
     "pytest>=8.4.0",
     "ruff>=0.12.0",
 ]
