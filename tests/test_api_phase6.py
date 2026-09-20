@@ -25,6 +25,19 @@ def test_health_openapi_and_state_endpoints() -> None:
     assert "/agent/requests" in paths
     assert "/approvals/pending" in paths
     assert "/evaluation/run" in paths
+    assert "/metrics" in paths
+
+
+def test_request_id_and_metrics_endpoint() -> None:
+    api = client()
+
+    response = api.get("/health", headers={"X-Request-ID": "demo-request-1"})
+
+    assert response.headers["X-Request-ID"] == "demo-request-1"
+    metrics = api.get("/metrics").json()
+    assert metrics["requests"]["requests_total"] >= 1
+    assert metrics["requests"]["requests_successful"] >= 1
+    assert "average_request_latency_ms" in metrics["requests"]
 
 
 def test_support_read_endpoints_and_missing_records() -> None:
@@ -114,6 +127,9 @@ def test_end_to_end_medium_refund_approval_replay_and_audit() -> None:
         json={"actor": "demo-manager", "comment": "Again."},
     )
     assert replay.status_code == 409
+    metrics = api.get("/metrics").json()
+    assert metrics["approvals"]["approval_replay_blocks"] >= 1
+    assert metrics["safety"]["unauthorized_action_blocks"] >= 1
 
     audit = api.get(f"/audit/requests/{request_id}").json()
     event_types = [event["event_type"] for event in audit]

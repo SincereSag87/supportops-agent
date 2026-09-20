@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     api_timeout_seconds: float = Field(default=15, alias="API_TIMEOUT_SECONDS")
     agent_timeout_seconds: float = Field(default=120, alias="AGENT_TIMEOUT_SECONDS")
     evaluation_timeout_seconds: float = Field(default=900, alias="EVALUATION_TIMEOUT_SECONDS")
+    log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+    log_format: str = Field(default="json", alias="LOG_FORMAT")
+    log_file: str = Field(default="", alias="LOG_FILE")
     cors_origins: str = Field(
         default="http://localhost:7860,http://127.0.0.1:7860",
         alias="CORS_ORIGINS",
@@ -79,6 +82,14 @@ class Settings(BaseSettings):
         if value <= 0:
             raise ValueError("API/UI timeout values must be greater than 0")
         return value
+
+    @field_validator("log_format")
+    @classmethod
+    def validate_log_format(cls, value: str) -> str:
+        normalized = value.lower()
+        if normalized not in {"json", "text"}:
+            raise ValueError("LOG_FORMAT must be json or text")
+        return normalized
 
     @property
     def cors_origin_list(self) -> list[str]:

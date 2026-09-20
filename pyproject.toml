@@ -1,7 +1,7 @@
 [project]
 name = "supportops-agent"
-version = "0.1.0"
-description = "Local-first AI support operations agent foundation."
+version = "1.0.0"
+description = "Local-first AI support operations platform with safe tool calling, approvals, audit trails, and evaluation."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

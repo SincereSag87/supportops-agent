@@ -1,13 +1,15 @@
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from app.api.dependencies import ServiceContainer, get_container
 from app.api.errors import error_response
 from app.api.models import EvaluationRequestAPI
 from app.evaluation.models import EvaluationMode, SupportAgentBenchmark
 from app.services.evaluation_service import EvaluationService
 
 router = APIRouter(prefix="/evaluation", tags=["evaluation"])
+ContainerDep = Depends(get_container)
 
 BENCHMARK_REGISTRY = {
     "support-agent-demo": Path("benchmarks/support_agent_eval.json"),
@@ -34,7 +36,10 @@ def list_benchmarks() -> list[dict[str, object]]:
 
 
 @router.post("/run")
-def run_evaluation(request: EvaluationRequestAPI):
+def run_evaluation(
+    request: EvaluationRequestAPI,
+    container: ServiceContainer = ContainerDep,
+):
     path = BENCHMARK_REGISTRY.get(request.benchmark)
     if path is None:
         return error_response(404, "BENCHMARK_NOT_FOUND", "Unknown benchmark id.")
@@ -48,6 +53,10 @@ def run_evaluation(request: EvaluationRequestAPI):
         model=request.model,
         case_id=request.case_id,
     )
+    container.metrics_store.increment("evaluation.runs")
+    container.metrics_store.increment(f"evaluation.{mode.value}_runs")
+    if report.failed:
+        container.metrics_store.increment("evaluation.failures")
     return {
         "cases": report.case_count,
         "passed": report.passed,

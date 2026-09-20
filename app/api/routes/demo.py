@@ -5,8 +5,10 @@ from app.agent.safety import AgentSafetyController
 from app.api.dependencies import ServiceContainer, get_container
 from app.api.errors import error_response
 from app.api.models import DemoResetRequest, serialize_agent_result
+from app.api.routes.agent import record_agent_metrics
 from app.evaluation.models import decision_json
 from app.evaluation.recovery import ScriptedLLMProvider
+from app.observability.tracing import timer
 from app.services.agent_service import AgentService
 
 router = APIRouter(prefix="/demo", tags=["demo"])
@@ -139,11 +141,13 @@ def run_demo_scenario(
     if scenario is None:
         return error_response(404, "SCENARIO_NOT_FOUND", "Unknown scripted demo scenario.")
     service = _scripted_agent_service(container, scenario["decisions"])
-    result = service.handle_request(
-        str(scenario["user_input"]),
-        customer_id=str(scenario["customer_id"]),
-        model="scripted-demo",
-    )
+    with timer() as elapsed_ms:
+        result = service.handle_request(
+            str(scenario["user_input"]),
+            customer_id=str(scenario["customer_id"]),
+            model="scripted-demo",
+        )
+    record_agent_metrics(container, result, "scripted-demo", elapsed_ms())
     response = serialize_agent_result(result).model_dump(mode="json")
     response["mode"] = "scripted-demo"
     response["scenario_id"] = scenario_id

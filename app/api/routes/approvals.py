@@ -4,6 +4,8 @@ from fastapi import APIRouter, Depends
 
 from app.api.dependencies import ServiceContainer, get_container
 from app.api.models import ApprovalDecisionAPI, serialize_agent_result, serialize_approval
+from app.api.routes.agent import record_agent_metrics
+from app.observability.tracing import timer
 
 router = APIRouter(prefix="/approvals", tags=["approvals"])
 ContainerDep = Depends(get_container)
@@ -28,12 +30,15 @@ def approve(
     decision: ApprovalDecisionAPI,
     container: ServiceContainer = ContainerDep,
 ):
-    result = container.agent_service.resolve_approval(
-        approval_id,
-        approved=True,
-        decided_by=decision.actor,
-        comment=decision.comment,
-    )
+    with timer() as elapsed_ms:
+        result = container.agent_service.resolve_approval(
+            approval_id,
+            approved=True,
+            decided_by=decision.actor,
+            comment=decision.comment,
+        )
+    container.metrics_store.increment("approvals.granted")
+    record_agent_metrics(container, result, None, elapsed_ms())
     return serialize_agent_result(result)
 
 
@@ -43,10 +48,13 @@ def deny(
     decision: ApprovalDecisionAPI,
     container: ServiceContainer = ContainerDep,
 ):
-    result = container.agent_service.resolve_approval(
-        approval_id,
-        approved=False,
-        decided_by=decision.actor,
-        comment=decision.comment,
-    )
+    with timer() as elapsed_ms:
+        result = container.agent_service.resolve_approval(
+            approval_id,
+            approved=False,
+            decided_by=decision.actor,
+            comment=decision.comment,
+        )
+    container.metrics_store.increment("approvals.denied")
+    record_agent_metrics(container, result, None, elapsed_ms())
     return serialize_agent_result(result)

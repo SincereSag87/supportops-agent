@@ -14,6 +14,7 @@ from ui.formatters import (
     format_customer,
     format_error,
     format_health,
+    format_metrics,
     format_order,
     format_policy,
     format_ticket,
@@ -177,7 +178,12 @@ def run_evaluation(
 
 def refresh_system(client: SupportOpsAPIClient) -> str:
     try:
-        return format_health(client.health(), client.ollama_health(), client.state_health())
+        return "\n\n".join(
+            [
+                format_health(client.health(), client.ollama_health(), client.state_health()),
+                format_metrics(client.metrics()),
+            ]
+        )
     except Exception as exc:
         return format_error(exc)
 

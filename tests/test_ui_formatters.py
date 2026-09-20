@@ -9,6 +9,7 @@ from ui.formatters import (
     format_authorization_panel,
     format_customer,
     format_health,
+    format_metrics,
     format_order,
     format_policy,
     format_ticket,
@@ -79,6 +80,31 @@ def test_format_business_objects_and_system_health() -> None:
             "pending_approvals": 0,
             "audit_events": 0,
         },
+    )
+    assert "API requests: 2" in format_metrics(
+        {
+            "requests": {
+                "requests_total": 2,
+                "requests_successful": 1,
+                "requests_failed": 1,
+                "average_request_latency_ms": 3.5,
+            },
+            "agent": {
+                "agent_requests": 1,
+                "completed": 1,
+                "awaiting_approval": 0,
+                "escalated": 0,
+                "failed": 0,
+                "average_agent_latency_ms": 12,
+                "average_steps": 2,
+                "model_usage": {"scripted-demo": 1},
+            },
+            "policy": {"allow": 1},
+            "approvals": {"approval_requests": 0},
+            "tools": {"high_risk_proposals": 1, "high_risk_executions": 1},
+            "safety": {"unauthorized_action_blocks": 0},
+            "evaluation": {"evaluation_runs": 1},
+        }
     )
 
 

@@ -26,6 +26,39 @@ def format_health(health: dict, ollama: dict, state: dict) -> str:
     )
 
 
+def format_metrics(metrics: dict[str, Any]) -> str:
+    requests = metrics.get("requests", {})
+    agent = metrics.get("agent", {})
+    approvals = metrics.get("approvals", {})
+    policy = metrics.get("policy", {})
+    tools = metrics.get("tools", {})
+    safety = metrics.get("safety", {})
+    evaluation = metrics.get("evaluation", {})
+    return "\n".join(
+        [
+            "Operational metrics reset when the process restarts.",
+            f"API requests: {requests.get('requests_total', 0)}",
+            f"API successes: {requests.get('requests_successful', 0)}",
+            f"API failures: {requests.get('requests_failed', 0)}",
+            f"Average request latency ms: {requests.get('average_request_latency_ms', 0)}",
+            f"Agent requests: {agent.get('agent_requests', 0)}",
+            f"Completed: {agent.get('completed', 0)}",
+            f"Awaiting approval: {agent.get('awaiting_approval', 0)}",
+            f"Escalated: {agent.get('escalated', 0)}",
+            f"Failed: {agent.get('failed', 0)}",
+            f"Average agent latency ms: {agent.get('average_agent_latency_ms', 0)}",
+            f"Average steps: {agent.get('average_steps', 0)}",
+            f"Model usage: {agent.get('model_usage', {})}",
+            f"Policy decisions: {policy}",
+            f"Approval counts: {approvals}",
+            f"High-risk proposals: {tools.get('high_risk_proposals', 0)}",
+            f"High-risk executions: {tools.get('high_risk_executions', 0)}",
+            f"Safety blocks: {safety}",
+            f"Evaluation runs: {evaluation.get('evaluation_runs', 0)}",
+        ]
+    )
+
+
 def format_customer(customer: dict[str, Any]) -> str:
     return "\n".join(
         [

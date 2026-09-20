@@ -26,6 +26,7 @@ def test_api_client_health_support_agent_approvals_audit_evaluation_demo_reset()
             "/health": {"status": "ok"},
             "/health/ollama": {"reachable": False},
             "/health/state": {"customers": 5},
+            "/metrics": {"requests": {"requests_total": 1}},
             "/customers": [{"customer_id": "CUS-1001"}],
             "/customers/CUS-1001": {"customer_id": "CUS-1001"},
             "/orders/ORD-1001": {"order_id": "ORD-1001"},
@@ -57,6 +58,7 @@ def test_api_client_health_support_agent_approvals_audit_evaluation_demo_reset()
     assert client.health()["status"] == "ok"
     assert client.ollama_health()["reachable"] is False
     assert client.state_health()["customers"] == 5
+    assert client.metrics()["requests"]["requests_total"] == 1
     assert client.list_customers()[0]["customer_id"] == "CUS-1001"
     assert client.get_customer("CUS-1001")["customer_id"] == "CUS-1001"
     assert client.get_order("ORD-1001")["order_id"] == "ORD-1001"

@@ -29,6 +29,9 @@ class SupportOpsAPIClient:
     def state_health(self) -> dict[str, Any]:
         return self._request("GET", "/health/state")
 
+    def metrics(self) -> dict[str, Any]:
+        return self._request("GET", "/metrics")
+
     def list_customers(self) -> list[dict[str, Any]]:
         return self._request("GET", "/customers")
 

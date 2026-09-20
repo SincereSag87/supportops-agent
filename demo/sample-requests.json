@@ -1,0 +1,44 @@
+[
+  {
+    "scenario_id": "order-status",
+    "customer_id": "CUS-1001",
+    "user_input": "What is the status of my order ORD-1001?",
+    "expected_policy": null,
+    "expected_outcome": "Completed read-only status response."
+  },
+  {
+    "scenario_id": "low-refund",
+    "customer_id": "CUS-1001",
+    "user_input": "My headphones arrived damaged. Can I get a refund?",
+    "expected_policy": "ALLOW",
+    "expected_outcome": "Automatic synthetic refund for 79.99 USD."
+  },
+  {
+    "scenario_id": "medium-refund",
+    "customer_id": "CUS-1002",
+    "user_input": "Please refund my defective docking station ORD-1002.",
+    "expected_policy": "REQUIRE_APPROVAL",
+    "expected_outcome": "Pending approval, then one approved execution."
+  },
+  {
+    "scenario_id": "high-refund",
+    "customer_id": "CUS-1003",
+    "user_input": "Please refund high-value order ORD-1003.",
+    "expected_policy": "ESCALATE",
+    "expected_outcome": "Escalation with no refund execution."
+  },
+  {
+    "scenario_id": "old-order",
+    "customer_id": "CUS-1004",
+    "user_input": "Please refund old order ORD-1004.",
+    "expected_policy": "DENY",
+    "expected_outcome": "Denied by return-window policy."
+  },
+  {
+    "scenario_id": "ticket-create",
+    "customer_id": "CUS-1001",
+    "user_input": "Please open a support ticket for my damaged headphones.",
+    "expected_policy": null,
+    "expected_outcome": "Low-risk support ticket created."
+  }
+]

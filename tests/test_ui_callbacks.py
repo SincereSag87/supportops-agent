@@ -122,6 +122,22 @@ class FakeClient:
             "audit_events": 3,
         }
 
+    def metrics(self):
+        return {
+            "requests": {
+                "requests_total": 1,
+                "requests_successful": 1,
+                "requests_failed": 0,
+                "average_request_latency_ms": 2,
+            },
+            "agent": {"agent_requests": 1, "completed": 1},
+            "policy": {},
+            "approvals": {},
+            "tools": {},
+            "safety": {},
+            "evaluation": {},
+        }
+
     def reset_demo(self, confirm=True):
         return {"status": "reset"}
 

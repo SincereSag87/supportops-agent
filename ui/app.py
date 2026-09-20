@@ -1,4 +1,7 @@
+import os
 from functools import partial
+
+os.environ.setdefault("GRADIO_ANALYTICS_ENABLED", "False")
 
 import gradio as gr
 
@@ -185,7 +188,7 @@ Live evaluation measures model structured-decision reliability separately.
         with gr.Tab("System"):
             gr.Markdown("System health and demo-only reset controls.")
             refresh_system_btn = gr.Button("Refresh")
-            system_output = gr.Textbox(label="System", lines=12)
+            system_output = gr.Textbox(label="System and Metrics", lines=28)
             reset_confirm = gr.Checkbox(label="I understand this resets all synthetic demo state.")
             reset_btn = gr.Button("Reset Demo")
             reset_output = gr.Markdown("This affects synthetic demo data only.")

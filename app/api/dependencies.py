@@ -10,6 +10,7 @@ from app.audit.service import AuditService
 from app.core.config import Settings, get_settings
 from app.llm.base import LLMProvider
 from app.llm.ollama_provider import OllamaProvider
+from app.observability.metrics import MetricsStore
 from app.policies.engine import PolicyEngine
 from app.services.action_service import ActionService
 from app.services.agent_service import AgentService
@@ -33,10 +34,12 @@ class ServiceContainer:
     agent_service: AgentService
     evaluation_service: EvaluationService
     health_service: HealthService
+    metrics_store: MetricsStore
 
     @classmethod
     def create(cls, settings: Settings | None = None) -> "ServiceContainer":
         resolved = settings or get_settings()
+        metrics_store = MetricsStore()
         support_service = create_demo_support_service()
         tool_registry = create_support_tool_registry(support_service)
         approval_service = ApprovalService(InMemoryApprovalRepository())
@@ -71,6 +74,7 @@ class ServiceContainer:
             agent_service=agent_service,
             evaluation_service=EvaluationService(resolved),
             health_service=HealthService(resolved, tool_registry),
+            metrics_store=metrics_store,
         )
 
     def reset_demo_state(self) -> None:
@@ -85,6 +89,7 @@ class ServiceContainer:
         self.agent_service = fresh.agent_service
         self.evaluation_service = fresh.evaluation_service
         self.health_service = fresh.health_service
+        self.metrics_store = fresh.metrics_store
 
 
 @lru_cache(maxsize=1)

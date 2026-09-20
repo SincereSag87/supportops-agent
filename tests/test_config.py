@@ -12,6 +12,8 @@ def test_settings_defaults() -> None:
     assert settings.ollama_base_url == "http://localhost:11434/v1"
     assert settings.default_model == "llama3.2"
     assert settings.agent_max_steps == 8
+    assert settings.log_level == "INFO"
+    assert settings.log_format == "json"
     assert settings.auto_action_limit == Decimal("100.00")
     assert settings.approval_action_limit == Decimal("500.00")
 
@@ -42,3 +44,8 @@ def test_settings_policy_threshold_validation() -> None:
 def test_settings_max_steps_must_be_positive() -> None:
     with pytest.raises(ValidationError):
         Settings(AGENT_MAX_STEPS=0, _env_file=None)
+
+
+def test_settings_log_format_validation() -> None:
+    with pytest.raises(ValidationError):
+        Settings(LOG_FORMAT="xml", _env_file=None)
