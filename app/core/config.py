@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     llm_timeout_seconds: float = Field(default=90, alias="LLM_TIMEOUT_SECONDS")
     api_host: str = Field(default="127.0.0.1", alias="API_HOST")
     api_port: int = Field(default=8000, alias="API_PORT")
+    api_base_url: str = Field(default="http://127.0.0.1:8000", alias="API_BASE_URL")
+    gradio_host: str = Field(default="127.0.0.1", alias="GRADIO_HOST")
+    gradio_port: int = Field(default=7860, alias="GRADIO_PORT")
+    api_timeout_seconds: float = Field(default=15, alias="API_TIMEOUT_SECONDS")
+    agent_timeout_seconds: float = Field(default=120, alias="AGENT_TIMEOUT_SECONDS")
+    evaluation_timeout_seconds: float = Field(default=900, alias="EVALUATION_TIMEOUT_SECONDS")
     cors_origins: str = Field(
         default="http://localhost:7860,http://127.0.0.1:7860",
         alias="CORS_ORIGINS",
@@ -60,11 +66,18 @@ class Settings(BaseSettings):
             raise ValueError("LLM_TIMEOUT_SECONDS must be greater than 0")
         return value
 
-    @field_validator("api_port")
+    @field_validator("api_port", "gradio_port")
     @classmethod
     def validate_api_port(cls, value: int) -> int:
         if value <= 0 or value > 65535:
-            raise ValueError("API_PORT must be a valid TCP port")
+            raise ValueError("ports must be valid TCP ports")
+        return value
+
+    @field_validator("api_timeout_seconds", "agent_timeout_seconds", "evaluation_timeout_seconds")
+    @classmethod
+    def validate_api_timeouts(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("API/UI timeout values must be greater than 0")
         return value
 
     @property

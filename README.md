@@ -4,7 +4,7 @@ A local-first AI support operations agent focused on tool calling, policy enforc
 
 ## Overview
 
-SupportOps Agent is an original portfolio and client-demo project for building an agentic support operations system from first principles. Phase 6 exposes the system through a production-style FastAPI backend while preserving the policy, approval, action, audit, and evaluation boundaries.
+SupportOps Agent is an original portfolio and client-demo project for building an agentic support operations system from first principles. Phase 7 adds a polished Gradio Operations Console that consumes the FastAPI backend over HTTP while preserving the policy, approval, action, audit, and evaluation boundaries.
 
 The LLM proposes actions. The runtime decides whether they may execute.
 
@@ -69,6 +69,83 @@ flowchart TD
     C --> K
     J --> K
 ```
+
+Phase 7 UI architecture:
+
+```mermaid
+flowchart TD
+    A[Browser] --> B[Gradio Operations Console]
+    B -->|HTTP| C[FastAPI]
+    C --> D[Support Data]
+    C --> E[AgentService]
+    C --> F[ApprovalService]
+    C --> G[AuditService]
+    C --> H[EvaluationService]
+    H --> I[AgentRunner]
+    E --> I
+    I --> J[PolicyEngine]
+    J --> K[ActionService]
+    K --> L[Synthetic Backend]
+    D --> L
+```
+
+## Gradio Operations Console
+
+Start the backend in one terminal:
+
+```bash
+uv run uvicorn app.api.app:app --host 127.0.0.1 --port 8000
+```
+
+Start the UI in another terminal:
+
+```bash
+uv run python -m ui.app
+```
+
+Open:
+
+```text
+http://127.0.0.1:7860
+```
+
+The UI talks to the API through `SupportOpsAPIClient`; it does not import or call support repositories, policy services, approval services, action services, or evaluation services directly.
+
+## Client Demo Without Ollama
+
+Scripted scenarios use the exact same runtime safety, policy, approval, action, and audit services as the live agent path, but with deterministic decision inputs. This lets clients inspect the system even when local model inference is unavailable.
+
+When Ollama or a selected model is unavailable, the UI shows a friendly message and keeps scripted demos, approvals, audit, reset, and scripted evaluation available.
+
+## Operations Console Tabs
+
+| Tab | Purpose |
+| --- | --- |
+| Operations | Inspect synthetic customers, orders, tickets, and refund policy |
+| Agent Request | Run live model requests or deterministic scripted demos |
+| Approvals | Review, approve, or deny pending actions |
+| Audit Trail | Inspect chronological request audit events |
+| Evaluation | Run scripted or live benchmark evaluation |
+| System | Check API/Ollama/state health and reset demo state |
+
+The Agent Request tab displays status, response, request id, tool calls, tool results, approval requirements, safe execution trace, and an authorization panel. The trace is intentionally a safe execution trace, not chain-of-thought.
+
+The Approvals tab calls the API approval endpoints. It never executes tools directly.
+
+The System tab reset control requires explicit confirmation and affects synthetic demo data only.
+
+## Client Demo Workflow
+
+1. Open Operations and inspect `ORD-1001`.
+2. Run the `order-status` scripted demo.
+3. Run the `low-refund` scripted demo.
+4. Reset state.
+5. Run the `medium-refund` scripted demo.
+6. Approve it as `demo-manager`.
+7. Inspect `ORD-1002`.
+8. Open Audit Trail.
+9. Run the `high-refund` scripted demo.
+10. Run scripted evaluation.
 
 ## FastAPI Backend
 
@@ -423,7 +500,7 @@ Invoke-RestMethod `
     -Body (@{ actor = "demo-manager"; comment = "Approved for demo." } | ConvertTo-Json)
 ```
 
-## Current Phase 5 Capabilities
+## Current Phase 7 Capabilities
 
 - Centralized policy engine.
 - Trusted refund policy context.
@@ -443,16 +520,20 @@ Invoke-RestMethod `
 - FastAPI application factory and app-scoped service container.
 - HTTP endpoints for health, synthetic support data, agent requests, approvals, audit, evaluation, and scripted demos.
 - Demo-only state reset for repeatable client testing.
+- Gradio Operations Console backed by the FastAPI API.
+- API client with friendly handling for offline backend, model unavailable, timeouts, approval conflicts, and malformed responses.
+- UI tabs for operations, agent requests, approvals, audit, evaluation, and system health.
+- Client-friendly scripted demo workflow that works without Ollama.
 
 ## Known Limitations
 
 - In-memory state resets between ordinary CLI processes.
 - No external database yet.
-- No Gradio operations console yet.
 - No production authentication or authorization layer yet.
 - Live local model structured-output quality may vary.
 - API state is in-memory and resets when the server restarts.
 - API authentication is intentionally deferred.
+- UI is local-first and expects the FastAPI backend at `API_BASE_URL`.
 
 ## Quick Start
 
@@ -462,6 +543,7 @@ uv run pytest
 uv run ruff check .
 uv run python -m app.main --evaluate benchmarks/support_agent_eval.json
 uv run uvicorn app.api.app:app --host 127.0.0.1 --port 8000
+uv run python -m ui.app
 uv run python -m app.main --demo-approval-flow --approve-demo
 ```
 
@@ -473,7 +555,7 @@ uv run python -m app.main --demo-approval-flow --approve-demo
 4. Policy enforcement, approvals & audit trail [x]
 5. Agent evaluation & failure recovery [x]
 6. FastAPI backend [x]
-7. Gradio operations console
+7. Gradio operations console [x]
 8. Observability, deployment & portfolio release
 
 ## Security / Privacy
